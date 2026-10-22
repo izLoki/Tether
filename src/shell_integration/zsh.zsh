@@ -75,6 +75,9 @@ __tether_preexec() {
 }
 
 autoload -Uz add-zsh-hook
+__tether_add_line() { LBUFFER+=$'\n' }
+zle -N __tether_add_line
+bindkey $'\e\r' __tether_add_line
 add-zsh-hook precmd __tether_precmd
 add-zsh-hook preexec __tether_preexec
 # Run first among precmd hooks so $? is still the command's, and wrap PS1 last: themes

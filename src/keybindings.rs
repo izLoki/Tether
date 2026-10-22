@@ -25,6 +25,7 @@ pub enum Action {
     PrevTab,
     NextAttention,
     ToggleAgents,
+    ToggleCodex,
     FontBigger,
     FontSmaller,
     FontReset,
@@ -74,7 +75,7 @@ impl Group {
 }
 
 impl Action {
-    pub const ALL: [Action; 40] = [
+    pub const ALL: [Action; 41] = [
         Action::CommandPalette,
         Action::ToggleSidebar,
         Action::ToggleSecondarySidebar,
@@ -97,6 +98,7 @@ impl Action {
         Action::PrevTab,
         Action::NextAttention,
         Action::ToggleAgents,
+        Action::ToggleCodex,
         Action::FontBigger,
         Action::FontSmaller,
         Action::FontReset,
@@ -141,6 +143,7 @@ impl Action {
             Action::PrevTab => "Previous tab",
             Action::NextAttention => "Next agent session needing attention",
             Action::ToggleAgents => "Toggle the agents panel",
+            Action::ToggleCodex => "Toggle the Codex panel",
             Action::FontBigger => "Larger font",
             Action::FontSmaller => "Smaller font",
             Action::FontReset => "Reset font size",
@@ -186,6 +189,7 @@ impl Action {
             | Action::PrevTab
             | Action::NextAttention
             | Action::ToggleAgents
+            | Action::ToggleCodex
             | Action::RenameTab => Group::Sessions,
             Action::FocusPaneLeft
             | Action::FocusPaneRight
@@ -215,7 +219,7 @@ impl Action {
             // is a dead key on many layouts.
             Action::TogglePanel => cs(Key::Y),
             Action::FocusSessionsView => cs(Key::S),
-            Action::FocusWorkspacesView | Action::ResetLayout => None,
+            Action::FocusWorkspacesView | Action::ToggleCodex | Action::ResetLayout => None,
             Action::OpenSettings => c(Key::Comma),
             Action::KeyManager => cs(Key::K),
             Action::NewHost => cs(Key::N),

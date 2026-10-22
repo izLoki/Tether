@@ -29,10 +29,16 @@ const EDGE: f32 = 0.28;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TabTarget {
     /// Into `leaf` at `index` (counted before the dragged tab is removed).
-    Insert { leaf: NodePath, index: usize },
+    Insert {
+        leaf: NodePath,
+        index: usize,
+    },
     Append(NodePath),
     /// A new pane next to `leaf`.
-    Split { leaf: NodePath, split: Split },
+    Split {
+        leaf: NodePath,
+        split: Split,
+    },
 }
 
 /// What the tab list (or a dock tab's context menu) asks the app to do.
@@ -51,7 +57,10 @@ pub enum TabAction {
     PopOut(u64),
     /// Minimize a popped-out / floating window (or tab) into the mini-dock bar.
     MinimizeWindow(u64),
-    Move { uid: u64, target: TabTarget },
+    Move {
+        uid: u64,
+        target: TabTarget,
+    },
     /// A local shell by id; `None` = the default shell.
     NewShell(Option<String>),
     SetGrouped(bool),
@@ -179,8 +188,11 @@ impl VerticalTabs {
         let by_pane = opts.grouped && groups.len() > 1;
         let rows: Vec<&RowModel> = groups.iter().flat_map(|g| g.rows.iter()).collect();
         let per_col = ((ui.available_height() - 8.0) / row_h(opts)).floor().max(1.0) as usize;
-        let cols: Vec<(Option<usize>, Vec<&RowModel>)> =
-            if by_pane { groups.iter().enumerate().map(|(i, g)| (Some(i), g.rows.iter().collect())).collect() } else { rows.chunks(per_col).map(|c| (None, c.to_vec())).collect() };
+        let cols: Vec<(Option<usize>, Vec<&RowModel>)> = if by_pane {
+            groups.iter().enumerate().map(|(i, g)| (Some(i), g.rows.iter().collect())).collect()
+        } else {
+            rows.chunks(per_col).map(|c| (None, c.to_vec())).collect()
+        };
         let col_w = ((ui.available_width() - 8.0 * cols.len() as f32) / cols.len() as f32).clamp(COLUMN_MIN, COLUMN_MAX);
         egui::ScrollArea::both().id_salt("vtabs_columns").auto_shrink([false, false]).show(ui, |ui| {
             ui.horizontal_top(|ui| {
@@ -275,7 +287,10 @@ impl VerticalTabs {
         let mut badges_w = 0.0;
         if !renaming && let Some(tab) = tab {
             let line = if opts.compact { card } else { Rect::from_min_max(card.min, Pos2::new(card.right(), card.center().y + 1.0)) };
-            let badge_rect = Rect::from_min_max(Pos2::new(text_x + 40.0, line.top() + if opts.compact { 0.0 } else { 6.0 }), Pos2::new(card.right() - 8.0 - close_w * hover, line.bottom()));
+            let badge_rect = Rect::from_min_max(
+                Pos2::new(text_x + 40.0, line.top() + if opts.compact { 0.0 } else { 6.0 }),
+                Pos2::new(card.right() - 8.0 - close_w * hover, line.bottom()),
+            );
             // A child that doesn't allocate in the list (the row already did).
             let mut badges = ui.new_child(UiBuilder::new().max_rect(badge_rect).layout(egui::Layout::right_to_left(egui::Align::Center)));
             if self.badges.row_badges(tab, &mut badges, opts.compact) {
@@ -288,7 +303,12 @@ impl VerticalTabs {
         }
         let right = card.right() - 6.0 - (close_w * hover).max(badges_w);
         if renaming {
-            self.rename_field(ui, row.uid, Rect::from_min_max(Pos2::new(text_x - 4.0, card.top() + 5.0), Pos2::new(card.right() - 6.0, card.bottom() - 5.0)), actions);
+            self.rename_field(
+                ui,
+                row.uid,
+                Rect::from_min_max(Pos2::new(text_x - 4.0, card.top() + 5.0), Pos2::new(card.right() - 6.0, card.bottom() - 5.0)),
+                actions,
+            );
         } else {
             let tp = p.with_clip_rect(card.intersect(ui.clip_rect()));
             let title_col = if row.visible { theme::text() } else { theme::text_dim().lerp_to_gamma(theme::text(), hover) };
@@ -613,7 +633,13 @@ fn group_header(ui: &mut Ui, index: usize, group: &Group) -> egui::Response {
     };
     p.text(Pos2::new(rect.left() + 22.0, y), Align2::LEFT_CENTER, label, FontId::proportional(10.5), col);
     let n = group.rows.len();
-    p.text(Pos2::new(rect.right() - 6.0, y), Align2::RIGHT_CENTER, format!("{n} tab{}", if n == 1 { "" } else { "s" }), FontId::proportional(10.5), theme::text_faint().gamma_multiply(0.8));
+    p.text(
+        Pos2::new(rect.right() - 6.0, y),
+        Align2::RIGHT_CENTER,
+        format!("{n} tab{}", if n == 1 { "" } else { "s" }),
+        FontId::proportional(10.5),
+        theme::text_faint().gamma_multiply(0.8),
+    );
     resp
 }
 
@@ -658,7 +684,8 @@ pub fn paint_ghost(ctx: &egui::Context, pos: Pos2, icon: &str, title: &str, hue:
 pub fn drop_on_panes(ctx: &egui::Context, dock: &DockState<Tab>, area: Rect) -> Option<TabAction> {
     let drag = *egui::DragAndDrop::payload::<TabDrag>(ctx)?;
     let pos = ctx.pointer_latest_pos().filter(|p| area.contains(*p))?;
-    let (leaf, rect) = dock.iter_leaves().filter(|(p, l)| p.surface.is_main() && !l.tabs.is_empty()).map(|(p, l)| (p, l.rect)).find(|(_, r)| r.contains(pos))?;
+    let (leaf, rect) =
+        dock.iter_leaves().filter(|(p, l)| p.surface.is_main() && !l.tabs.is_empty()).map(|(p, l)| (p, l.rect)).find(|(_, r)| r.contains(pos))?;
     let (target, preview) = pane_zone(leaf, rect, pos);
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("vtabs_pane_drop")));
     let r = preview.shrink(4.0);

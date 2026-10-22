@@ -243,7 +243,11 @@ impl BlocksView {
                     let (o0, o1) = (clip(row_y(out)), clip(row_y(end)));
                     if o1 > o0 {
                         let alpha = if selected { 0.6 } else { 0.22 };
-                        painter.rect_filled(Rect::from_x_y_ranges(bar_x + 0.5..=bar_x + BAR_W - 0.5, o0..=o1), CornerRadius::same(1), color.gamma_multiply(alpha));
+                        painter.rect_filled(
+                            Rect::from_x_y_ranges(bar_x + 0.5..=bar_x + BAR_W - 0.5, o0..=o1),
+                            CornerRadius::same(1),
+                            color.gamma_multiply(alpha),
+                        );
                     }
                 }
                 if y1 > y0 {
@@ -400,11 +404,7 @@ fn step(handle: &TerminalHandle, from: u64, up: bool, at_live: bool) -> Option<(
     let live_top = shell.top_line(0);
     let ran = |b: &&Block| b.output_line.is_some();
     let from = if at_live { blocks.back().map_or(from, |b| b.prompt_line) } else { from };
-    let target = if up {
-        blocks.iter().rev().filter(ran).find(|b| b.prompt_line < from)
-    } else {
-        blocks.iter().filter(ran).find(|b| b.prompt_line > from)
-    };
+    let target = if up { blocks.iter().rev().filter(ran).find(|b| b.prompt_line < from) } else { blocks.iter().filter(ran).find(|b| b.prompt_line > from) };
     Some((target.map(|b| (b.id, b.prompt_line)), live_top))
 }
 

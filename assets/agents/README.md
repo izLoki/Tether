@@ -1,0 +1,1 @@
+The Codex mark is the OpenAI blossom used by the official Codex desktop app. Source: Codex for Windows 26.1013.4894.0, webview/assets/logo-18892d25d393.svg. The geometry is unchanged; the fill is white so the UI can tint it for light and dark themes. OpenAI retains its rights to the mark, which identifies the integrated product. Brand guidelines: https://openai.com/brand/

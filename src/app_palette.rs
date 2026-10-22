@@ -85,8 +85,9 @@ impl TetherApp {
         r.add(Entry::new("Hosts", "Import hosts…", Command::ImportHosts).detail("Bitvise profiles, SSH config"));
         for l in crate::agents::launch::available() {
             let (kind, command) = (l.kind, l.command);
-            r.add(Entry::new("Agent", format!("Launch {}", kind.name()), Command::LaunchAgent { kind, command, pick_folder: false }).detail(command));
-            r.add(Entry::new("Agent", format!("Launch {} in folder…", kind.name()), Command::LaunchAgent { kind, command, pick_folder: true }));
+            r.add(
+                Entry::new("Agent", format!("Launch {}…", kind.name()), Command::LaunchAgent { kind, command }).detail("Choose a project directory and shell"),
+            );
         }
         for name in self.workspaces.names() {
             r.add(Entry::new("Workspace", format!("Restore {name}"), Command::RestoreWorkspace(name)));
@@ -154,12 +155,13 @@ impl TetherApp {
             Command::RestoreWorkspace(name) => self.restore_workspace(&name, ctx),
             Command::OpenLayoutSettings => self.open_layout_settings(),
             Command::ImportHosts => self.import = Some(crate::ui::import_view::ImportDialog::new(&self.store)),
-            Command::LaunchAgent { kind, command, pick_folder } => {
-                let pick = crate::ui::agents_panel::LaunchPick { kind, command, pick_folder };
-                let target = self.dock.focused_leaf().or_else(|| self.dock.iter_leaves().next().map(|(p, _)| p)).unwrap_or(egui_dock::NodePath {
-                    surface: egui_dock::SurfaceIndex::main(),
-                    node: egui_dock::NodeIndex::root(),
-                });
+            Command::LaunchAgent { kind, command } => {
+                let pick = crate::ui::agents_panel::LaunchPick { kind, command: command.into(), shell_id: None, cwd: None };
+                let target = self
+                    .dock
+                    .focused_leaf()
+                    .or_else(|| self.dock.iter_leaves().next().map(|(p, _)| p))
+                    .unwrap_or(egui_dock::NodePath { surface: egui_dock::SurfaceIndex::main(), node: egui_dock::NodeIndex::root() });
                 self.open_agents_in(vec![(target, pick)], ctx);
             }
             Command::Run(f) => f(ctx),
@@ -168,8 +170,8 @@ impl TetherApp {
 
     /// Runs a shortcut action (from its key or the palette).
     pub(super) fn run_action(&mut self, a: Action, ctx: &egui::Context) {
-        use egui_dock::Split;
         use crate::workspace::TabKind;
+        use egui_dock::Split;
         match a {
             Action::CommandPalette => {
                 if self.palette.take().is_none() {
@@ -226,6 +228,9 @@ impl TetherApp {
             }
             Action::NextAttention => self.focus_next_attention(ctx),
             Action::ToggleAgents => self.toggle_agents(),
+            Action::ToggleCodex => {
+                let _ = crate::settings::update(|s| s.layout.views.click(View::Codex));
+            }
             // Handled by the focused terminal / hovered SFTP pane themselves.
             Action::PrevPrompt | Action::NextPrompt => {
                 let up = a == Action::PrevPrompt;
@@ -241,7 +246,6 @@ impl TetherApp {
         }
     }
 }
-
 
 fn category(g: Group) -> &'static str {
     match g {

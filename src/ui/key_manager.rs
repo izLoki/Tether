@@ -102,6 +102,7 @@ pub struct KeyManager {
     /// Show / hide state of the passphrase fields in the inline forms.
     show_pass: bool,
     opened_at: Option<f64>,
+    key_search: Option<super::key_search::KeySearch>,
 }
 
 impl KeyManager {
@@ -116,6 +117,7 @@ impl KeyManager {
             install_host: None,
             show_pass: false,
             opened_at: None,
+            key_search: None,
         }
     }
 
@@ -171,7 +173,16 @@ impl KeyManager {
                 });
             });
         });
-        if modal.should_close() && matches!(outcome, KeyOutcome::Open) && self.pending.is_none() {
+        if let Some(search) = &mut self.key_search {
+            let (path, close) = search.show(ctx);
+            if close {
+                self.key_search = None;
+            }
+            if let Some(path) = path {
+                self.import_path(&path, keys, &mut outcome);
+            }
+        }
+        if modal.should_close() && self.key_search.is_none() && matches!(outcome, KeyOutcome::Open) && self.pending.is_none() {
             outcome = KeyOutcome::Close;
         }
         outcome
@@ -203,6 +214,9 @@ impl KeyManager {
             );
             ui.add_space(6.0);
         }
+        if ui.button("Search this PC for SSH keys…").clicked() {
+            self.key_search = Some(super::key_search::KeySearch::new(ui.ctx()));
+        }
         egui::ScrollArea::vertical().id_salt("key_list").auto_shrink([false, false]).show(ui, |ui| {
             if keys.keys.is_empty() {
                 ui.add_space(24.0);
@@ -230,7 +244,11 @@ impl KeyManager {
 
     fn import(&mut self, keys: &mut KeyStore, outcome: &mut KeyOutcome) {
         let Some(path) = rfd::FileDialog::new().set_title("Import private key").pick_file() else { return };
-        match keys.import_file(&path) {
+        self.import_path(&path, keys, outcome);
+    }
+
+    fn import_path(&mut self, path: &std::path::Path, keys: &mut KeyStore, outcome: &mut KeyOutcome) {
+        match keys.import_file(path) {
             Ok(meta) => {
                 self.select(meta.id);
                 self.message = Some((true, format!("Imported “{}”", meta.name)));

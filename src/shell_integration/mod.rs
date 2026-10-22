@@ -254,7 +254,10 @@ esac
 /// always LF, whatever git checked out.
 pub fn files() -> Vec<(&'static str, String)> {
     let lf = |s: &str| s.replace("\r\n", "\n");
-    let zshrc = zsh_file(".zshrc", &format!("[[ -r ${{ZDOTDIR}}/tether.zsh ]] && . ${{ZDOTDIR}}/tether.zsh\n[[ -o login ]] || {{ {} }}\n", ZSH_RESTORE.replace('\n', "; ")));
+    let zshrc = zsh_file(
+        ".zshrc",
+        &format!("[[ -r ${{ZDOTDIR}}/tether.zsh ]] && . ${{ZDOTDIR}}/tether.zsh\n[[ -o login ]] || {{ {} }}\n", ZSH_RESTORE.replace('\n', "; ")),
+    );
     vec![
         ("bash-rc.sh", lf(&format!("{BASH_RC_PRELUDE}\n{BASH}"))),
         ("fish.fish", lf(FISH)),

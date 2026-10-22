@@ -400,7 +400,7 @@ mod tests {
         let l: LayoutSettings = serde_json::from_str(old).unwrap();
         assert_eq!(l.tab_position, TabPosition::Top);
         assert_eq!(l.sidebar_side, Side::Right);
-        assert_eq!(l.views.primary.views, vec![View::Workspaces, View::Hosts, View::Sessions, View::Agents]);
+        assert_eq!(l.views.primary.views, vec![View::Workspaces, View::Hosts, View::Sessions, View::Agents, View::Codex]);
         assert_eq!(l.views.primary.active, Some(View::Sessions));
         assert!(l.views.primary.collapsed, "a hidden sidebar is a folded one");
         assert_eq!(l.views.size(Container::Primary), 300.0);

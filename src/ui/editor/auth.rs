@@ -92,6 +92,18 @@ impl ProfileEditor {
                 },
             );
         }
+        if form::button(ui, "Search this PC for SSH keys…", Kind::Ghost, true).clicked() {
+            self.key_search = Some(crate::ui::key_search::KeySearch::new(ui.ctx()));
+        }
+        if let Some(search) = &mut self.key_search {
+            let (picked, close) = search.show(ui.ctx());
+            if let Some(path) = picked {
+                self.profile.auth = AuthMethod::Key { path };
+            }
+            if close {
+                self.key_search = None;
+            }
+        }
         ui.add_space(10.0);
         self.secret_field(ui, "Passphrase", "only if the key has one", "Leave blank to be asked when connecting.");
     }

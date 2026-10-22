@@ -99,7 +99,12 @@ fn view_row(ui: &mut Ui, l: &mut LayoutSettings, v: View) {
         ui.label(egui::RichText::new(v.title()).size(13.5).color(theme::text()));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let mut pick = place;
-            let options = [(Place::In(Container::Primary), "Primary"), (Place::In(Container::Secondary), "Secondary"), (Place::In(Container::Panel), "Panel"), (Place::Hidden, "Hidden")];
+            let options = [
+                (Place::In(Container::Primary), "Primary"),
+                (Place::In(Container::Secondary), "Secondary"),
+                (Place::In(Container::Panel), "Panel"),
+                (Place::Hidden, "Hidden"),
+            ];
             w::segmented(ui, &mut pick, &options);
             if pick != place {
                 match pick {
@@ -177,7 +182,16 @@ fn preview(ui: &mut Ui, l: &LayoutSettings) {
         side_preview(&p, &mut body, l.views.get(c), side == Side::Right, &anim, c);
     }
     let panel = &l.views.panel;
-    let panel_h = anim("panel", if panel.is_empty() { 0.0 } else if panel.collapsed { 11.0 } else { body.height() * 0.36 });
+    let panel_h = anim(
+        "panel",
+        if panel.is_empty() {
+            0.0
+        } else if panel.collapsed {
+            11.0
+        } else {
+            body.height() * 0.36
+        },
+    );
     if panel_h > 0.5 {
         let r = Rect::from_min_max(Pos2::new(body.left(), body.bottom() - panel_h), body.max);
         body.max.y = r.top() - 3.0;
@@ -254,8 +268,16 @@ fn content_lines(p: &egui::Painter, r: Rect, view: Option<View>) {
                 p.rect_filled(row, CornerRadius::same(2), theme::surface_3());
                 p.rect_filled(Rect::from_min_size(row.min, Vec2::new(2.0, row.height())), CornerRadius::same(1), theme::accent());
             }
-            p.rect_filled(Rect::from_center_size(Pos2::new(row.left() + 7.0, row.center().y), Vec2::splat(4.5)), CornerRadius::same(1), theme::hue_color(60.0 * k as f32 + 140.0));
-            p.rect_filled(Rect::from_min_size(Pos2::new(row.left() + 13.0, row.center().y - 1.5), Vec2::new(row.width() * 0.5, 3.0)), CornerRadius::same(1), theme::text_faint().gamma_multiply(0.6));
+            p.rect_filled(
+                Rect::from_center_size(Pos2::new(row.left() + 7.0, row.center().y), Vec2::splat(4.5)),
+                CornerRadius::same(1),
+                theme::hue_color(60.0 * k as f32 + 140.0),
+            );
+            p.rect_filled(
+                Rect::from_min_size(Pos2::new(row.left() + 13.0, row.center().y - 1.5), Vec2::new(row.width() * 0.5, 3.0)),
+                CornerRadius::same(1),
+                theme::text_faint().gamma_multiply(0.6),
+            );
             y += 11.0;
         } else {
             let line = Rect::from_min_size(Pos2::new(r.left() + 5.0, y), Vec2::new((r.width() - 10.0) * [0.8, 0.6, 0.7, 0.5, 0.65][k], 3.5));
@@ -267,7 +289,10 @@ fn content_lines(p: &egui::Painter, r: Rect, view: Option<View>) {
 
 /// Two panes, the left focused; tab strips unless vertical tabs are on screen.
 fn panes(p: &egui::Painter, body: Rect, l: &LayoutSettings, anim: &dyn Fn(&str, f32) -> f32) {
-    let panes = [Rect::from_min_max(body.min, Pos2::new(body.center().x - 1.5, body.bottom())), Rect::from_min_max(Pos2::new(body.center().x + 1.5, body.top()), body.max)];
+    let panes = [
+        Rect::from_min_max(body.min, Pos2::new(body.center().x - 1.5, body.bottom())),
+        Rect::from_min_max(Pos2::new(body.center().x + 1.5, body.top()), body.max),
+    ];
     let dim = anim("dim", if l.dim_inactive_panes { l.dim_amount() } else { 0.0 });
     let strips = anim("strips", if l.tab_bars_hidden() { 0.0 } else { 11.0 });
     for (k, pane) in panes.into_iter().enumerate() {
@@ -287,7 +312,11 @@ fn panes(p: &egui::Painter, body: Rect, l: &LayoutSettings, anim: &dyn Fn(&str, 
             }
             let wfrac = [0.5, 0.75, 0.35, 0.6][line];
             let col = if line == 0 { theme::accent() } else { theme::text_dim() };
-            p.rect_filled(Rect::from_min_size(Pos2::new(content.left() + 6.0, y), Vec2::new(content.width() * wfrac * 0.8, 3.0)), CornerRadius::same(1), col.gamma_multiply(0.6));
+            p.rect_filled(
+                Rect::from_min_size(Pos2::new(content.left() + 6.0, y), Vec2::new(content.width() * wfrac * 0.8, 3.0)),
+                CornerRadius::same(1),
+                col.gamma_multiply(0.6),
+            );
         }
         if k == 0 {
             p.rect_stroke(content, CornerRadius::same(4), Stroke::new(1.0, theme::accent().gamma_multiply(0.7)), egui::StrokeKind::Inside);

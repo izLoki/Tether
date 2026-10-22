@@ -75,7 +75,10 @@ fn shells(ui: &mut Ui, out: &mut Option<WelcomeAction>) {
     let Some(default) = crate::pty::shells::pick_default(shells, &crate::settings::get().terminal.default_shell) else { return };
     card(ui, "Start", |ui| {
         let text = format!("{}  New {}", default.icon_kind.glyph(), default.name);
-        if wide_button(ui, &text, keybindings::label(Action::NewLocalTerminal), true).on_hover_text(keybindings::hint("Local terminal", Action::NewLocalTerminal)).clicked() {
+        if wide_button(ui, &text, keybindings::label(Action::NewLocalTerminal), true)
+            .on_hover_text(keybindings::hint("Local terminal", Action::NewLocalTerminal))
+            .clicked()
+        {
             *out = Some(WelcomeAction::Shell(default));
         }
         let others: Vec<&'static ShellSpec> = shells.iter().filter(|s| s.id != default.id).collect();
@@ -84,7 +87,9 @@ fn shells(ui: &mut Ui, out: &mut Option<WelcomeAction>) {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
                 for s in others {
-                    let chip = egui::Button::new(RichText::new(format!("{}  {}", s.icon_kind.glyph(), s.name)).size(12.0)).fill(theme::surface_2()).corner_radius(CornerRadius::same(7));
+                    let chip = egui::Button::new(RichText::new(format!("{}  {}", s.icon_kind.glyph(), s.name)).size(12.0))
+                        .fill(theme::surface_2())
+                        .corner_radius(CornerRadius::same(7));
                     if ui.add(chip).clicked() {
                         *out = Some(WelcomeAction::Shell(s));
                     }
@@ -106,10 +111,16 @@ fn hosts(ui: &mut Ui, profiles: &[Profile], out: &mut Option<WelcomeAction>) {
         }
         ui.add_space(6.0);
         ui.columns(2, |cols| {
-            if cols[0].add(egui::Button::new(RichText::new("+  New host").size(12.5)).min_size(Vec2::new(cols[0].available_width(), 32.0)).fill(theme::accent_soft())).clicked() {
+            if cols[0]
+                .add(egui::Button::new(RichText::new("+  New host").size(12.5)).min_size(Vec2::new(cols[0].available_width(), 32.0)).fill(theme::accent_soft()))
+                .clicked()
+            {
                 *out = Some(WelcomeAction::NewHost);
             }
-            if cols[1].add(egui::Button::new(RichText::new("⬇  Import from Bitvise / SSH config").size(12.5)).min_size(Vec2::new(cols[1].available_width(), 32.0))).clicked() {
+            if cols[1]
+                .add(egui::Button::new(RichText::new("⬇  Import from Bitvise / SSH config").size(12.5)).min_size(Vec2::new(cols[1].available_width(), 32.0)))
+                .clicked()
+            {
                 *out = Some(WelcomeAction::Import);
             }
         });
@@ -132,7 +143,13 @@ fn host_row(ui: &mut Ui, p: &Profile) -> egui::Response {
     let initial = p.display_name().chars().next().unwrap_or('?').to_uppercase().to_string();
     paint.text(tile.center(), Align2::CENTER_CENTER, initial, FontId::proportional(12.0), tint);
     paint.text(Pos2::new(tile.right() + 10.0, rect.center().y), Align2::LEFT_CENTER, p.display_name(), FontId::proportional(13.0), theme::text());
-    paint.text(Pos2::new(rect.right() - 12.0, rect.center().y), Align2::RIGHT_CENTER, p.address(), FontId::proportional(11.5), theme::text_faint().lerp_to_gamma(theme::text_dim(), h));
+    paint.text(
+        Pos2::new(rect.right() - 12.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        p.address(),
+        FontId::proportional(11.5),
+        theme::text_faint().lerp_to_gamma(theme::text_dim(), h),
+    );
     resp
 }
 
@@ -184,7 +201,8 @@ fn cheat_sheet(ui: &mut Ui, out: &mut Option<WelcomeAction>) {
             }
         });
         ui.add_space(6.0);
-        let link = ui.add(egui::Label::new(RichText::new("Everything else is in the command palette  ›").size(11.5).color(theme::accent())).sense(Sense::click()));
+        let link =
+            ui.add(egui::Label::new(RichText::new("Everything else is in the command palette  ›").size(11.5).color(theme::accent())).sense(Sense::click()));
         if link.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }

@@ -39,8 +39,11 @@ pub enum Command {
     OpenLayoutSettings,
     /// The "Import hosts" dialog (Bitvise, SSH config).
     ImportHosts,
-    /// Start an AI agent CLI in a new default shell.
-    LaunchAgent { kind: crate::agents::AgentKind, command: &'static str, pick_folder: bool },
+    /// Choose a local project and shell, then start an AI agent CLI.
+    LaunchAgent {
+        kind: crate::agents::AgentKind,
+        command: &'static str,
+    },
     /// Anything else: runs on the UI thread when chosen.
     Run(Arc<dyn Fn(&egui::Context) + Send + Sync>),
 }
@@ -207,7 +210,8 @@ fn action_keywords(a: Action) -> &'static str {
         Action::NewLocalTerminal => "shell console",
         Action::ToggleBroadcast => "all terminals sync",
         Action::NextAttention => "agent waiting jump",
-        Action::ToggleAgents => "ai claude codex",
+        Action::ToggleAgents => "ai claude",
+        Action::ToggleCodex => "ai codex openai",
         _ => "",
     }
 }
@@ -241,7 +245,8 @@ pub fn fuzzy_match(needle: &str, hay: &str) -> Option<(i32, Vec<usize>)> {
     let lower_str: String = lower.iter().collect();
     let substring_at = lower_str.find(&needle_str).map(|byte| lower_str[..byte].chars().count());
 
-    let word_start = |i: usize| i == 0 || matches!(h[i - 1], ' ' | '-' | '_' | '/' | '\\' | '.' | ':' | '·' | '(') || (h[i - 1].is_lowercase() && h[i].is_uppercase());
+    let word_start =
+        |i: usize| i == 0 || matches!(h[i - 1], ' ' | '-' | '_' | '/' | '\\' | '.' | ':' | '·' | '(') || (h[i - 1].is_lowercase() && h[i].is_uppercase());
 
     // Greedy forward pass, preferring word starts: for each needle char take the next
     // word-start occurrence if one comes before the next plain occurrence's run ends.

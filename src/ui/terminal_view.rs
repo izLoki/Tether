@@ -50,6 +50,8 @@ pub fn metrics(ctx: &egui::Context, font: &FontId, line_height: f32) -> Metrics 
 }
 
 pub struct TerminalView {
+    /// Enabled by the tab's foreground-agent detector, independent of badge visibility.
+    pub images_enabled: bool,
     pub handle: TerminalHandle,
     size: (u16, u16),
     scroll: usize,
@@ -66,14 +68,10 @@ pub struct TerminalView {
     last_stage: Stage,
     /// Cursor `(row, col)` when the user started typing on the current shell prompt.
     prompt_col: Option<(u16, u16)>,
-    /// Characters typed since the last submitted/cancelled line (fallback before echo).
-    typed_line: String,
     /// Hand `nano <file>` to the built-in SFTP editor (off for local shells).
     pub intercept_nano: bool,
     /// Take keyboard focus on the next frame (the agents panel jumping to this tab).
     pub want_focus: bool,
-    /// The current Ctrl+V press was already handled (text paste or the fallback below).
-    ctrl_v_handled: bool,
     /// Fallback working directory (e.g. from an AI agent hook when OSC 7 hasn't fired).
     pub fallback_cwd: Option<String>,
     /// Boxed to keep `TabBody` small.
@@ -82,6 +80,12 @@ pub struct TerminalView {
 
 /// Painted rows and the last header info seen.
 struct ViewCache {
+    /// Clipboard and file-drop input must only be handled once per gesture/frame.
+    paste_guard: super::os_input::PasteGuard,
+    last_drop_frame: Option<u64>,
+    /// Characters typed since the last submitted/cancelled line (fallback before echo).
+    typed_line: String,
+    attachments: super::attachments::Attachments,
     grid: GridCache,
     /// Last OSC title and link state seen, for the tab header (read without blocking).
     title: Option<String>,
@@ -114,11 +118,27 @@ pub struct ViewOutput {
     pub reconnect: bool,
     /// Remote files the user asked to edit from the shell (e.g. `nano <file>`).
     pub open_files: Vec<String>,
+    pub open_folders: Vec<String>,
+}
+
+impl ViewOutput {
+    fn link_action(&mut self, action: Option<super::term_links::LinkAction>) {
+        match action {
+            Some(super::term_links::LinkAction::OpenRemote(path)) => self.open_files.push(path),
+            Some(super::term_links::LinkAction::OpenSftp(path)) => self.open_folders.push(path),
+            None => {}
+        }
+    }
 }
 
 impl TerminalView {
+    pub fn attachments(&mut self) -> &mut super::attachments::Attachments {
+        &mut self.cache.attachments
+    }
+
     pub fn new(handle: TerminalHandle) -> Self {
         Self {
+            images_enabled: false,
             handle,
             size: (0, 0),
             scroll: 0,
@@ -132,13 +152,15 @@ impl TerminalView {
             connecting_since: None,
             last_stage: Stage::Connecting,
             prompt_col: None,
-            typed_line: String::new(),
             intercept_nano: true,
             want_focus: false,
-            ctrl_v_handled: false,
             fallback_cwd: None,
             cache: Box::new(ViewCache {
+                paste_guard: Default::default(),
+                last_drop_frame: None,
                 grid: GridCache::default(),
+                typed_line: String::new(),
+                attachments: Default::default(),
                 title: None,
                 cwd: None,
                 link: LinkState::Connecting,
@@ -185,7 +207,10 @@ impl TerminalView {
         let mut out = ViewOutput::default();
         let settings = settings::snapshot();
         let cfg = &settings.terminal;
-        let rect = ui.available_rect_before_wrap();
+        let full_rect = ui.available_rect_before_wrap();
+        let bar_height = if self.images_enabled { 34.0 } else { 0.0 };
+        let bar_rect = Rect::from_min_max(egui::pos2(full_rect.left(), (full_rect.bottom() - bar_height).max(full_rect.top())), full_rect.max);
+        let rect = Rect::from_min_max(full_rect.min, egui::pos2(full_rect.right(), bar_rect.top()));
         let id = ui.id().with("terminal");
         let response = ui.interact(rect, id, Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Terminal"));
@@ -226,6 +251,12 @@ impl TerminalView {
         // Glyph layout for new rows happens with the lock released.
         self.cache.grid.layout(ui.ctx());
         let FrameInfo { state, stage, bells, history, app_cursor, bracketed, alt_screen, cursor } = frame;
+        let ready = self.cache.attachments.poll(ui.ctx());
+        if self.images_enabled && !ready.is_empty() {
+            // Each image belongs to this terminal/SSH target, even during broadcast.
+            self.handle.send(keys::encode_paste(&super::os_input::format_paths(&ready), bracketed));
+            self.want_focus = true;
+        }
         self.cache.link.clone_from(&state);
 
         let to_cell = |p: Pos2| Cell {
@@ -238,9 +269,7 @@ impl TerminalView {
         let sel = self.selection.map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
         self.cache.grid.paint(&painter, inner.min, m, |row| selection_cols(sel, row, cols));
         if !alt_screen {
-            if let Some(super::term_links::LinkAction::OpenRemote(path)) = self.cache.links.paint_and_menu(ui, &painter, inner, m, accent) {
-                out.open_files.push(path);
-            }
+            out.link_action(self.cache.links.paint_and_menu(ui, &painter, inner, m, accent));
             let geom = super::blocks::Geom { rect, inner, cell_h: m.cell_h, rows };
             if let Some(req) = self.cache.blocks.paint(ui, geom, &settings.shell_integration, accent) {
                 self.block_request(req, ui.ctx(), &mut out);
@@ -290,6 +319,9 @@ impl TerminalView {
         }
         self.connecting_screen(ui, rect, &state, stage, profile, now);
         out.reconnect = state_overlay(ui, rect, &state);
+        if self.images_enabled {
+            self.cache.attachments.bar(ui, bar_rect);
+        }
         if !out.input.is_empty() {
             self.scroll = 0;
             self.selection = None;
@@ -300,14 +332,7 @@ impl TerminalView {
 
     /// Locks the terminal just long enough to clamp the scroll offset, refresh the row
     /// cache and copy out what the rest of the frame needs. `None` if the lock is poisoned.
-    fn sync_grid(
-        &mut self,
-        size: (u16, u16),
-        font: &FontId,
-        palette: &theme::Palette,
-        render: RenderKey,
-        hover_cell: Option<(u16, u16)>,
-    ) -> Option<FrameInfo> {
+    fn sync_grid(&mut self, size: (u16, u16), font: &FontId, palette: &theme::Palette, render: RenderKey, hover_cell: Option<(u16, u16)>) -> Option<FrameInfo> {
         let shared_arc = self.handle.shared.clone();
         let mut shared = shared_arc.lock().ok()?;
         let generation = shared.generation;
@@ -526,6 +551,13 @@ impl TerminalView {
         (alt_screen, app_cursor): (bool, bool),
         out: &mut ViewOutput,
     ) {
+        if !alt_screen
+            && response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && self.cache.links.on_secondary_click(pos)
+        {
+            return;
+        }
         if response.drag_started() {
             if let Some(p) = response.interact_pointer_pos() {
                 self.selection = Some((to_cell(p), to_cell(p)));
@@ -536,15 +568,11 @@ impl TerminalView {
             }
         } else if response.clicked() {
             let ctrl = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-            if !alt_screen
-                && let Some(p) = response.interact_pointer_pos()
-            {
+            if !alt_screen && let Some(p) = response.interact_pointer_pos() {
                 let (intercepted, action) = self.cache.links.on_click(p, ctrl, ui.ctx());
                 if intercepted {
                     self.selection = None;
-                    if let Some(super::term_links::LinkAction::OpenRemote(path)) = action {
-                        out.open_files.push(path);
-                    }
+                    out.link_action(action);
                     return;
                 }
             }
@@ -593,17 +621,32 @@ impl TerminalView {
                 Event::Text(t) => {
                     if !mods.ctrl && !mods.alt {
                         self.mark_prompt_start();
-                        self.typed_line.push_str(&t);
+                        self.cache.typed_line.push_str(&t);
                     }
                     out.input.extend(keys::encode_text(&t, mods.alt && !mods.ctrl));
                 }
                 Event::Paste(t) => {
+                    if !self.cache.paste_guard.explicit(ui.ctx().cumulative_frame_nr()) {
+                        continue;
+                    }
+                    let files = super::os_input::clipboard_files();
+                    if self.images_enabled && files.iter().any(|p| super::attachments::is_image(p)) {
+                        let (images, other): (Vec<_>, Vec<_>) = files.into_iter().partition(|p| super::attachments::is_image(p));
+                        self.cache.attachments.add(images, ui.ctx());
+                        if !other.is_empty() {
+                            out.input.extend(keys::encode_paste(&super::os_input::format_paths(&other), bracketed));
+                        }
+                        continue;
+                    }
+                    if self.images_enabled && super::os_input::clipboard_has_image() && self.cache.attachments.paste_image(ui.ctx()) {
+                        continue;
+                    }
                     self.mark_prompt_start();
                     if let Some(last) = t.rsplit(['\n', '\r']).next() {
                         if t.contains(['\n', '\r']) {
-                            self.typed_line.clear();
+                            self.cache.typed_line.clear();
                         }
-                        self.typed_line.push_str(last);
+                        self.cache.typed_line.push_str(last);
                     }
                     out.input.extend(keys::encode_paste(&t, bracketed));
                 }
@@ -614,12 +657,16 @@ impl TerminalView {
                     }
                     _ => {
                         self.prompt_col = None;
-                        self.typed_line.clear();
+                        self.cache.typed_line.clear();
                         out.input.push(0x03);
                     }
                 },
                 Event::Cut => out.input.push(0x18),
                 Event::Key { key, pressed: true, modifiers, .. } => {
+                    if self.images_enabled && key == egui::Key::Enter && !modifiers.shift && self.cache.attachments.is_pending() {
+                        self.cache.attachments.notice = Some("Preparing images… Press Enter once the attachment is ready.".into());
+                        continue;
+                    }
                     if let Some(up) = super::blocks::step_key(key, modifiers).filter(|_| self.cache.blocks.active()) {
                         self.block_request(super::blocks::Request::Step(up), ui.ctx(), out);
                         continue;
@@ -631,11 +678,13 @@ impl TerminalView {
                     }
                     if matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown | egui::Key::Tab) {
                         self.mark_prompt_start();
+                    } else if key == egui::Key::Enter && modifiers.shift && !modifiers.ctrl && !modifiers.alt {
+                        self.cache.typed_line.push('\n');
                     } else if key == egui::Key::Backspace && !modifiers.ctrl && !modifiers.alt {
-                        self.typed_line.pop();
+                        self.cache.typed_line.pop();
                     } else if (modifiers.ctrl || modifiers.command) && matches!(key, egui::Key::C | egui::Key::U) {
                         self.prompt_col = None;
-                        self.typed_line.clear();
+                        self.cache.typed_line.clear();
                     } else if key == egui::Key::Enter && !modifiers.shift && !modifiers.ctrl && !modifiers.alt && !modifiers.command {
                         if let Some(files) = self.take_nano_command().filter(|_| self.intercept_nano) {
                             // Cancel the typed command line in the remote shell and open the file(s) in Tether's editor.
@@ -663,8 +712,7 @@ impl TerminalView {
 
     /// Ctrl+V with no text on the clipboard: egui-winit drops the key press entirely, so
     /// it is detected from the physical key state / the V release instead. Files copied in
-    /// Explorer paste as their paths; an image (screenshot) sends Alt+V (`ESC v`), which is
-    /// Claude Code's "paste image" key on Windows.
+    /// Explorer paste as paths; screenshots become image attachments.
     fn paste_without_text(&mut self, ui: &Ui, bracketed: bool, out: &mut ViewOutput) {
         let (had_paste, released_v) = ui.input(|i| {
             let paste = i.events.iter().any(|e| matches!(e, Event::Paste(_)));
@@ -674,27 +722,26 @@ impl TerminalView {
             (paste, release)
         });
         let down = super::os_input::ctrl_v_down();
-        if had_paste {
-            self.ctrl_v_handled = true;
-        }
-        if !self.ctrl_v_handled && (down || released_v) {
-            self.ctrl_v_handled = true;
-            self.paste_clipboard_non_text(bracketed, out);
-        }
-        if !down && !had_paste {
-            self.ctrl_v_handled = false;
+        if self.cache.paste_guard.fallback(ui.ctx().cumulative_frame_nr(), down, released_v, had_paste) {
+            self.paste_clipboard_non_text(ui.ctx(), bracketed, out);
         }
     }
 
-    fn paste_clipboard_non_text(&mut self, bracketed: bool, out: &mut ViewOutput) {
+    fn paste_clipboard_non_text(&mut self, ctx: &egui::Context, bracketed: bool, out: &mut ViewOutput) {
         let files = super::os_input::clipboard_files();
         if !files.is_empty() {
-            self.mark_prompt_start();
-            out.input.extend(keys::encode_paste(&super::os_input::format_paths(&files), bracketed));
+            let (images, files): (Vec<_>, Vec<_>) = files.into_iter().partition(|p| self.images_enabled && super::attachments::is_image(p));
+            if !images.is_empty() {
+                self.cache.attachments.add(images, ctx);
+            }
+            if !files.is_empty() {
+                self.mark_prompt_start();
+                out.input.extend(keys::encode_paste(&super::os_input::format_paths(&files), bracketed));
+            }
             return;
         }
-        if super::os_input::clipboard_has_image() && !super::os_input::clipboard_has_text() {
-            out.input.extend_from_slice(b"\x1bv");
+        if self.images_enabled && super::os_input::clipboard_has_image() && !super::os_input::clipboard_has_text() {
+            self.cache.attachments.paste_image(ctx);
         }
     }
 
@@ -713,15 +760,27 @@ impl TerminalView {
         if glow > 0.0 {
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, CornerRadius::same(theme::RADIUS), theme::accent().gamma_multiply(0.08 * glow));
-            painter.rect_stroke(rect.shrink(1.0), CornerRadius::same(theme::RADIUS), Stroke::new(1.5, theme::accent().gamma_multiply(glow)), egui::StrokeKind::Inside);
+            painter.rect_stroke(
+                rect.shrink(1.0),
+                CornerRadius::same(theme::RADIUS),
+                Stroke::new(1.5, theme::accent().gamma_multiply(glow)),
+                egui::StrokeKind::Inside,
+            );
             painter.text(rect.center(), Align2::CENTER_CENTER, "Drop to insert path", FontId::proportional(14.0), theme::text().gamma_multiply(glow));
             ui.ctx().request_repaint();
         }
         if dropped.is_empty() || !over {
             return false;
         }
+        let frame = ui.ctx().cumulative_frame_nr();
+        if self.cache.last_drop_frame == Some(frame) {
+            return false;
+        }
+        self.cache.last_drop_frame = Some(frame);
         self.mark_prompt_start();
-        out.input.extend(keys::encode_paste(&super::os_input::format_paths(&dropped), bracketed));
+        let (images, files): (Vec<_>, Vec<_>) = dropped.into_iter().partition(|p| self.images_enabled && super::attachments::is_image(p));
+        self.cache.attachments.add(images, ui.ctx());
+        out.input.extend(keys::encode_paste(&super::os_input::format_paths(&files), bracketed));
         true
     }
 
@@ -770,7 +829,10 @@ impl TerminalView {
     /// `nano <file…>` invocation that should open in Tether's built-in editor.
     fn take_nano_command(&mut self) -> Option<Vec<String>> {
         let prompt = self.prompt_col.take();
-        let typed = std::mem::take(&mut self.typed_line);
+        let typed = std::mem::take(&mut self.cache.typed_line);
+        if typed.contains(['\r', '\n']) {
+            return None;
+        }
         let shared = self.handle.shared.lock().ok()?;
         let screen = shared.parser.screen();
         if screen.alternate_screen() {
@@ -882,7 +944,19 @@ pub fn parse_nano_command(cmd: &str) -> Option<Vec<String>> {
             if arg.starts_with('-') && arg.len() > 1 {
                 if matches!(
                     arg.as_str(),
-                    "-C" | "--backupdir" | "-o" | "--operatingdir" | "-r" | "--fill" | "-s" | "--speller" | "-T" | "--tabsize" | "-Q" | "--quotestr" | "-Y" | "--syntax"
+                    "-C" | "--backupdir"
+                        | "-o"
+                        | "--operatingdir"
+                        | "-r"
+                        | "--fill"
+                        | "-s"
+                        | "--speller"
+                        | "-T"
+                        | "--tabsize"
+                        | "-Q"
+                        | "--quotestr"
+                        | "-Y"
+                        | "--syntax"
                 ) {
                     let _ = args.next();
                 }
@@ -927,11 +1001,11 @@ fn split_shell_words(cmd: &str) -> Option<Vec<String>> {
                     }
                     if dc == '\\'
                         && let Some(&next) = chars.peek()
-                            && matches!(next, '"' | '\\' | '$' | '`')
-                        {
-                            cur.push(chars.next().unwrap());
-                            continue;
-                        }
+                        && matches!(next, '"' | '\\' | '$' | '`')
+                    {
+                        cur.push(chars.next().unwrap());
+                        continue;
+                    }
                     if matches!(dc, '$' | '`') {
                         return None;
                     }
@@ -1058,6 +1132,139 @@ mod bench;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_button_follows_foreground_agent_and_releases_its_space() {
+        use egui_kittest::kittest::Queryable;
+        let enabled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let state = enabled.clone();
+        let (handle, _rx) = TerminalHandle::new(24, 80);
+        handle.shared.lock().unwrap().state = LinkState::Connected;
+        let mut view = TerminalView::new(handle);
+        let mut h = egui_kittest::Harness::builder().with_size(Vec2::new(800.0, 500.0)).build_ui(move |ui| {
+            view.images_enabled = state.load(std::sync::atomic::Ordering::Relaxed);
+            view.ui(ui, &Profile::new());
+        });
+        h.run_steps(3);
+        assert!(h.query_by_label("+ Image").is_none());
+        let height = h.get_by_label("Terminal").rect().height();
+        enabled.store(true, std::sync::atomic::Ordering::Relaxed);
+        h.run_steps(3);
+        h.get_by_label("+ Image");
+        assert_eq!(h.get_by_label("Terminal").rect().height(), height - 34.0);
+        enabled.store(false, std::sync::atomic::Ordering::Relaxed);
+        h.run_steps(3);
+        assert!(h.query_by_label("+ Image").is_none());
+        assert_eq!(h.get_by_label("Terminal").rect().height(), height);
+    }
+
+    #[test]
+    fn clicking_the_ssh_prompt_directory_emits_sftp_not_terminal_input() {
+        use egui_kittest::kittest::Queryable;
+        let prompt = "prisma@na-prisma-02:~/servers/practice-servers/na-practice-01$";
+        let (handle, _rx) = TerminalHandle::new(24, 100);
+        {
+            let mut s = handle.shared.lock().unwrap();
+            s.state = LinkState::Connected;
+            s.parser.process(prompt.as_bytes());
+        }
+        let mut view = TerminalView::new(handle);
+        let actions = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let output = actions.clone();
+        let pointer = std::sync::Arc::new(std::sync::Mutex::new(Pos2::ZERO));
+        let position = pointer.clone();
+        let mut h = egui_kittest::Harness::builder().with_size(Vec2::new(1000.0, 500.0)).build_ui(move |ui| {
+            let settings = settings::snapshot();
+            let cfg = &settings.terminal;
+            let font = FontId::new(cfg.font_size(), FontFamily::Monospace);
+            let m = metrics(ui.ctx(), &font, cfg.line_height());
+            let inner = ui.available_rect_before_wrap().shrink(cfg.padding());
+            *position.lock().unwrap() = inner.min + Vec2::new((prompt.find("servers").unwrap() as f32 + 2.5) * m.cell_w, m.cell_h * 0.5);
+            let out = view.ui(ui, &Profile::new());
+            assert!(out.input.is_empty());
+            output.lock().unwrap().extend(out.open_folders);
+        });
+        h.run_steps(3);
+        let pos = *pointer.lock().unwrap();
+        h.event(Event::PointerMoved(pos));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            h.run_steps(2);
+        }
+        assert_eq!(&*actions.lock().unwrap(), &["~prisma/servers/practice-servers/na-practice-01"]);
+        for pressed in [true, false] {
+            h.event(Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE });
+            h.run_steps(2);
+        }
+        h.get_by_label("📁  Open in SFTP").click();
+        h.run_steps(3);
+        assert_eq!(actions.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn first_image_drop_is_sent_once_even_when_layout_repeats() {
+        use crate::ssh::terminal::TermCmd;
+        #[derive(Debug)]
+        struct FileDrop(std::path::PathBuf);
+        impl egui::DroppedFile for FileDrop {
+            fn path(&self) -> &std::path::Path {
+                &self.0
+            }
+            fn bytes(&self) -> Result<Vec<u8>, String> {
+                std::fs::read(&self.0).map_err(|e| e.to_string())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.png");
+        image::RgbaImage::new(8, 8).save(&path).unwrap();
+        let (handle, mut rx) = TerminalHandle::new(24, 80);
+        {
+            let mut s = handle.shared.lock().unwrap();
+            s.state = LinkState::Connected;
+            s.parser.process(b"\x1b[?2004h");
+        }
+        let mut view = TerminalView::new(handle);
+        view.images_enabled = true;
+        let ctx = egui::Context::default();
+        let mut sent = Vec::new();
+        for gesture in 0..2 {
+            let mut repeat_layout = true;
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 400.0))),
+                events: vec![Event::PointerMoved(Pos2::new(100.0, 100.0))],
+                dropped_files: vec![std::sync::Arc::new(FileDrop(path.clone()))],
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                let out = view.ui(ui, &Profile::new());
+                assert!(out.input.is_empty(), "image-only drops must not send an empty bracketed paste");
+                if std::mem::take(&mut repeat_layout) {
+                    ctx.request_discard("exercise repeated input during attachment layout");
+                }
+            });
+            output.textures_delta.clear();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while view.cache.attachments.is_pending() {
+                let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 400.0))), ..Default::default() };
+                let mut output = ctx.run_ui(input, |ui| {
+                    view.ui(ui, &Profile::new());
+                });
+                output.textures_delta.clear();
+                assert!(std::time::Instant::now() < deadline, "attachment worker did not finish");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            while let Ok(cmd) = rx.try_recv() {
+                if let TermCmd::Input(bytes) = cmd {
+                    sent.push(bytes);
+                }
+            }
+            assert_eq!(sent.len(), gesture + 1, "each intentional drop must send exactly one path");
+            let text = String::from_utf8_lossy(sent.last().unwrap());
+            assert_eq!(text.matches(".png").count(), 1);
+            assert!(text.starts_with("\x1b[200~") && text.ends_with("\x1b[201~"));
+        }
+    }
 
     #[test]
     fn selection_spans_rows() {

@@ -83,7 +83,7 @@ impl Sidebar {
         ui.separator();
         expand_collapse(ui, actions);
         ui.separator();
-        if item(ui, "⬇", "Import hosts…").clicked() {
+        if item(ui, "⬇", "Import / export setup…").clicked() {
             actions.push(SidebarAction::Import);
         }
         if bound(ui, "🔑", "Key manager", Action::KeyManager).clicked() {
@@ -123,7 +123,7 @@ impl Sidebar {
         if bound(ui, "⚡", "Quick connect", Action::QuickConnect).clicked() {
             self.focus_quick = true;
         }
-        if item(ui, "⬇", "Import hosts…").clicked() {
+        if item(ui, "⬇", "Import / export setup…").clicked() {
             actions.push(SidebarAction::Import);
         }
     }

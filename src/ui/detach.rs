@@ -105,13 +105,7 @@ impl Detacher {
     /// Runs once per frame of the main window, after the main dock was shown.
     /// Renders the detached windows (their tab output is collected into `viewer`),
     /// moves tabs between windows, and docks windows that rest over the app.
-    pub fn frame(
-        &mut self,
-        ctx: &egui::Context,
-        main: &mut DockState<Tab>,
-        viewer: &mut Viewer,
-        mini_dock: &mut super::mini_dock::MiniDock,
-    ) {
+    pub fn frame(&mut self, ctx: &egui::Context, main: &mut DockState<Tab>, viewer: &mut Viewer, mini_dock: &mut super::mini_dock::MiniDock) {
         let (main_inner, main_outer, content, now) = ctx.input(|i| (i.viewport().inner_rect, i.viewport().outer_rect, i.content_rect(), i.time));
         let mut drops: Vec<(Option<u64>, OutDrop)> = Vec::new();
         if let Some(d) = track_drag(ctx, main, Id::new(MAIN_DOCK_ID), &mut self.main_track) {
@@ -314,9 +308,7 @@ fn show_window(ctx: &egui::Context, w: &mut DetachedWindow, viewer: &mut Viewer)
 
             // Minimize to mini-dock bar button in the top-right header of the detached window.
             let btn_rect = Rect::from_min_size(Pos2::new(full_rect.right() - 32.0, full_rect.top() + 5.0), Vec2::new(24.0, 20.0));
-            let min_resp = ui
-                .interact(btn_rect, w.dock_id.with("min_to_bar"), egui::Sense::click())
-                .on_hover_text("Minimize to mini-bar");
+            let min_resp = ui.interact(btn_rect, w.dock_id.with("min_to_bar"), egui::Sense::click()).on_hover_text("Minimize to mini-bar");
             let bg = if min_resp.hovered() { theme::accent_soft() } else { theme::surface_2().gamma_multiply(0.85) };
             ui.painter().rect_filled(btn_rect, CornerRadius::same(5), bg);
             ui.painter().rect_stroke(btn_rect, CornerRadius::same(5), Stroke::new(1.0, theme::border().gamma_multiply(0.5)), StrokeKind::Inside);

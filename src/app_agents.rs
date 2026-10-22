@@ -23,7 +23,13 @@ fn local_terms<'a>(dock: &'a DockState<Tab>, out: &mut Vec<TermInfo<'a>>) {
     for (_, leaf) in dock.iter_leaves() {
         for (i, tab) in leaf.tabs.iter().enumerate() {
             if let (TabBody::Terminal(view), true) = (&tab.body, tab.is_local()) {
-                out.push(TermInfo { uid: tab.uid, handle: &view.handle, visible: i == leaf.active.0, label: tab.profile.display_name(), custom: tab.custom_title.as_deref() });
+                out.push(TermInfo {
+                    uid: tab.uid,
+                    handle: &view.handle,
+                    visible: i == leaf.active.0,
+                    label: tab.profile.display_name(),
+                    custom: tab.custom_title.as_deref(),
+                });
             }
         }
     }
@@ -71,6 +77,24 @@ impl TetherApp {
         local_terms(&self.dock, &mut terms);
         for dock in self.detached.docks_mut() {
             local_terms(dock, &mut terms);
+        }
+        let mut visited = Vec::new();
+        self.project_cwds.retain(|uid, _| terms.iter().any(|t| t.uid == *uid));
+        for term in &terms {
+            let cwd = term.handle.shared.lock().ok().and_then(|s| s.parser.callbacks().cwd.clone());
+            if let Some(cwd) = cwd.filter(|s| !s.is_empty() && s.len() <= 4096)
+                && self.project_cwds.get(&term.uid) != Some(&cwd)
+            {
+                self.project_cwds.insert(term.uid, cwd.clone());
+                visited.push(cwd);
+            }
+        }
+        if !visited.is_empty() {
+            let _ = crate::settings::update(|s| {
+                for path in visited {
+                    s.projects.record(&path, crate::local_projects::now());
+                }
+            });
         }
         Self::command_notices(&toasts, ctx, &terms, window_focused);
         let alerts = self.agents.frame(ctx, terms, Instant::now());
@@ -163,7 +187,10 @@ impl TetherApp {
             return;
         }
         let text = RichText::new(format!("{waiting}")).size(12.0).strong().color(theme::warn());
-        let tip = keybindings::hint(&format!("{waiting} agent session{} need{} you: jump to the next", if waiting == 1 { "" } else { "s" }, if waiting == 1 { "s" } else { "" }), Action::NextAttention);
+        let tip = keybindings::hint(
+            &format!("{waiting} agent session{} need{} you: jump to the next", if waiting == 1 { "" } else { "s" }, if waiting == 1 { "s" } else { "" }),
+            Action::NextAttention,
+        );
         let resp = super::chrome::chrome_button(ui, Some(crate::ui::settings_widgets::Icon::Sparkle), Some(text), super::chrome::ButtonTone::Warn, &tip);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Agents · {waiting} need attention")));
         if resp.clicked() {
@@ -195,6 +222,7 @@ impl TetherApp {
         match action {
             Some(PanelAction::Focus(uid)) => self.focus_tab(uid, ctx),
             Some(PanelAction::Close) => self.toggle_agents(),
+            Some(PanelAction::CustomBoot(kind)) => self.custom_boot = Some(crate::ui::agents_panel::CustomBoot::new(kind)),
             Some(PanelAction::Launch(pick)) => {
                 let target = self.dock.focused_leaf().or_else(|| self.dock.iter_leaves().next().map(|(p, _)| p));
                 let target = target.unwrap_or(egui_dock::NodePath { surface: egui_dock::SurfaceIndex::main(), node: egui_dock::NodeIndex::root() });
@@ -207,21 +235,52 @@ impl TetherApp {
         }
     }
 
+    pub(super) fn launch_agent_command(&mut self, kind: AgentKind, command: String, ctx: &egui::Context) {
+        self.apply_agents_panel(Some(PanelAction::Launch(LaunchPick { kind, command, shell_id: None, cwd: None })), ctx);
+    }
+
+    pub(super) fn custom_boot_modal(&mut self, ctx: &egui::Context) {
+        let Some(boot) = &mut self.custom_boot else { return };
+        let (command, close) = boot.show(ctx);
+        let target = boot.target;
+        if close {
+            self.custom_boot = None;
+        }
+        if let Some(command) = command {
+            if let Some(target) = target {
+                self.open_agents_in(vec![(target, command)], ctx);
+            } else {
+                self.apply_agents_panel(Some(PanelAction::Launch(command)), ctx);
+            }
+        }
+    }
+
     /// Opens agents picked from panes' "+" menus: the default shell, then the command.
     pub(super) fn open_agents_in(&mut self, picks: Vec<(egui_dock::NodePath, LaunchPick)>, ctx: &egui::Context) {
         for (path, pick) in picks {
-            let Some(shell) = crate::pty::shells::default_shell() else {
+            if pick.cwd.is_none() {
+                self.custom_boot = Some(crate::ui::agents_panel::CustomBoot::launch(pick, path));
+                continue;
+            }
+            let prefs = crate::settings::snapshot();
+            let shell_id = pick.shell_id.as_deref().or_else(|| prefs.agents.launch_shells.get(pick.kind.id()).map(String::as_str));
+            let Some(shell) = shell_id.and_then(crate::pty::shells::find).or_else(crate::pty::shells::default_shell) else {
                 self.toasts.error("No local shell was found on this machine");
                 return;
             };
-            let cwd = if pick.pick_folder {
-                match rfd::FileDialog::new().set_title(format!("Start {} in", pick.kind.name())).pick_folder() {
-                    Some(dir) => Some(dir),
-                    None => continue,
+            let cwd = pick.cwd;
+            if let Some(dir) = &cwd {
+                if !dir.is_dir() {
+                    self.toasts.error("The project folder no longer exists");
+                    continue;
                 }
-            } else {
-                None
-            };
+                let _ = crate::settings::update(|s| s.projects.record(&dir.display().to_string(), crate::local_projects::now()));
+            }
+            if pick.shell_id.is_some() {
+                let _ = crate::settings::update(|s| {
+                    s.agents.launch_shells.insert(pick.kind.id().into(), shell.id.clone());
+                });
+            }
             let tab = self.local_tab(shell, cwd, ctx);
             if let TabBody::Terminal(view) = &tab.body {
                 // The pty buffers this until the shell reads its first line.

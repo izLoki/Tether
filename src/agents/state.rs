@@ -140,8 +140,10 @@ pub struct Tracker {
     pub state: AgentState,
     /// When `state` was entered.
     pub since: Instant,
-    /// Hook events have arrived for this session (activity heuristics are then off).
+    /// Hook events have arrived for this session, including completion-only notify.
     pub hooked: bool,
+    /// Full lifecycle hooks suppress heuristics; Codex notify only reports completion.
+    lifecycle_hooks: bool,
     /// Last notification / prompt / message, for the agents panel.
     pub message: Option<String>,
     /// `message` came from terminal output (OSC 9/777/99), not from the agent's hooks.
@@ -166,6 +168,7 @@ impl Tracker {
             state: AgentState::Idle,
             since: now,
             hooked: false,
+            lifecycle_hooks: false,
             message: None,
             message_from_terminal: false,
             last_input: None,
@@ -201,9 +204,7 @@ impl Tracker {
                 // Child scripts and shells often ring `\x07` while Claude is working; never
                 // let a bell interrupt a hooked turn, an active spinner, or running subprocesses.
                 AgentState::Idle if !self.subprocs_busy && self.active_subagents == 0 => self.set(AgentState::NeedsInput, now),
-                AgentState::Working
-                    if !self.hooked && !self.subprocs_busy && self.active_subagents == 0 && self.prev_title_busy != Some(true) =>
-                {
+                AgentState::Working if !self.hooked && !self.subprocs_busy && self.active_subagents == 0 && self.prev_title_busy != Some(true) => {
                     self.set(AgentState::NeedsInput, now)
                 }
                 _ => None,
@@ -230,6 +231,11 @@ impl Tracker {
             }
             Event::Hook { kind, message } => {
                 self.hooked = !matches!(kind, HookKind::SessionEnd);
+                match kind {
+                    HookKind::SessionEnd => self.lifecycle_hooks = false,
+                    HookKind::TurnComplete => {}
+                    _ => self.lifecycle_hooks = true,
+                }
                 if let Some(m) = message.filter(|m| !m.trim().is_empty()) {
                     self.message = Some(m);
                     self.message_from_terminal = false;
@@ -265,11 +271,7 @@ impl Tracker {
                         self.active_subagents = self.active_subagents.saturating_sub(1);
                         // If a subagent finished while the session was mistakenly marked Done or NeedsInput,
                         // parent Claude is now continuing its turn.
-                        if matches!(self.state, AgentState::Done | AgentState::NeedsInput) {
-                            self.set(AgentState::Working, now)
-                        } else {
-                            None
-                        }
+                        if matches!(self.state, AgentState::Done | AgentState::NeedsInput) { self.set(AgentState::Working, now) } else { None }
                     }
                 }
             }
@@ -322,7 +324,7 @@ impl Tracker {
             Some(false)
                 if prev_busy == Some(true)
                     && self.state == AgentState::Working
-                    && !self.hooked
+                    && !self.lifecycle_hooks
                     && !obs.subprocs_busy
                     && self.active_subagents == 0 =>
             {
@@ -340,7 +342,7 @@ impl Tracker {
             return self.set(AgentState::Done, now);
         }
         // The title speaks for programs that set one; hooks speak for hooked sessions.
-        if self.hooked || obs.title_busy == Some(true) {
+        if self.lifecycle_hooks || obs.title_busy == Some(true) {
             return None;
         }
         if obs.title_busy.is_some() && !self.output_is_work(now) {
@@ -372,7 +374,7 @@ impl Tracker {
     /// How soon `observe` should run again even if nothing is printed (a silence can
     /// end a turn). `None` when only new output or events can change anything.
     pub fn recheck_in(&self, now: Instant) -> Option<Duration> {
-        if self.hooked && !self.by_subprocs {
+        if self.lifecycle_hooks && !self.by_subprocs {
             return None;
         }
         match self.state {
@@ -419,6 +421,25 @@ mod tests {
     fn quiet(t: &mut Tracker, start: Instant, at: u64) -> Option<Transition> {
         let last = t.prev_output;
         t.observe(Observation { title_busy: None, last_output: last, subprocs_busy: false }, start + ms(at))
+    }
+
+    #[test]
+    fn codex_completion_does_not_disable_tracking_the_next_turn() {
+        let start = Instant::now();
+        let mut t = Tracker::new(start);
+        stream(&mut t, start, 0, 1500);
+        assert_eq!(t.state, AgentState::Working);
+        t.apply(Event::Hook { kind: HookKind::TurnComplete, message: Some("First answer".into()) }, start + ms(1600));
+        assert!(t.hooked);
+        assert_eq!(t.state, AgentState::Done);
+        t.apply(Event::Input, start + ms(4000));
+        assert_eq!(t.state, AgentState::Idle);
+        assert_eq!(stream(&mut t, start, 6000, 7500), vec![(AgentState::Idle, AgentState::Working)]);
+        t.apply(Event::Hook { kind: HookKind::TurnComplete, message: Some("Second answer".into()) }, start + ms(7600));
+        assert_eq!(t.state, AgentState::Done);
+        assert_eq!(t.message.as_deref(), Some("Second answer"));
+        t.apply(Event::Notify("Approval needed: allow command?".into()), start + ms(9000));
+        assert_eq!(t.state, AgentState::NeedsPermission);
     }
 
     #[test]

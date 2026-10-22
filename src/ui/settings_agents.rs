@@ -71,7 +71,7 @@ pub fn show(ui: &mut Ui, s: &mut Settings, st: &mut AgentsState, gap: f32) {
         });
     });
     ui.add_space(gap);
-    w::card(ui, Some("Hooks (exact states)"), |ui| hooks(ui, st));
+    w::card(ui, Some("Agent signals"), |ui| hooks(ui, st));
 }
 
 fn status_text(status: &Status) -> (String, egui::Color32) {
@@ -86,8 +86,8 @@ fn status_text(status: &Status) -> (String, egui::Color32) {
 fn hooks(ui: &mut Ui, st: &mut AgentsState) {
     ui.label(
         RichText::new(
-            "Hooks make Claude Code and Codex report each turn to tether. They only act inside tether terminals \
-             (TETHER_SESSION is set there), exit at once elsewhere, and never block the agent.",
+            "Claude hooks report turn states. Codex notify reports completed turns; terminal activity and process monitoring track ongoing work. \
+             These signals only act inside Tether terminals and never block the agent.",
         )
         .size(11.5)
         .color(theme::text_dim()),

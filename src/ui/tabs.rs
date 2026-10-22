@@ -92,13 +92,7 @@ impl Tab {
         {
             return Some(cwd);
         }
-        let osc_cwd = t
-            .handle
-            .shared
-            .try_lock()
-            .ok()
-            .and_then(|s| s.parser.callbacks().cwd.clone())
-            .or_else(|| t.remote_cwd().map(str::to_string));
+        let osc_cwd = t.handle.shared.try_lock().ok().and_then(|s| s.parser.callbacks().cwd.clone()).or_else(|| t.remote_cwd().map(str::to_string));
         if osc_cwd.is_some() {
             return osc_cwd;
         }
@@ -113,11 +107,7 @@ impl Tab {
     pub fn spec(&self) -> TabSpec {
         let cwd = self.current_cwd();
         if let Some(shell) = &self.local {
-            return TabSpec {
-                title: self.custom_title.clone(),
-                cwd,
-                ..TabSpec::new(uuid::Uuid::nil(), TabKind::Local { shell_id: shell.id.clone() })
-            };
+            return TabSpec { title: self.custom_title.clone(), cwd, ..TabSpec::new(uuid::Uuid::nil(), TabKind::Local { shell_id: shell.id.clone() }) };
         }
         let kind = match self.body {
             TabBody::Terminal(_) => TabKind::Terminal,
@@ -182,7 +172,9 @@ impl Tab {
                 // The agent's own folder (from its hooks) names the project best.
                 let agent_cwd = agent.and_then(|_| crate::agents::hub::agent_cwd(self.uid));
                 let title_cwd = agent_cwd.as_deref().or(cwd);
-                return crate::agents::title::tab_title(self.custom_title.as_deref(), agent, title.as_deref(), title_cwd, |raw| pty::tab_title(shell, raw, cwd));
+                return crate::agents::title::tab_title(self.custom_title.as_deref(), agent, title.as_deref(), title_cwd, |raw| {
+                    pty::tab_title(shell, raw, cwd)
+                });
             }
             (TabBody::Terminal(t), None) => t.remote_title(),
             (TabBody::Sftp(_), _) => None,
@@ -286,6 +278,7 @@ pub struct Viewer {
     pub inputs: Vec<(u64, Vec<u8>)>,
     pub reconnect: Vec<u64>,
     pub open_files: Vec<(u64, Vec<String>)>,
+    pub open_folders: Vec<(u64, String)>,
     pub focused_uid: Option<u64>,
     /// Shells picked from a pane's "+" menu, opened in that pane.
     pub new_local: Vec<(egui_dock::NodePath, &'static ShellSpec)>,
@@ -327,6 +320,13 @@ const PILL_GAP: f32 = 7.0;
 const DOCK_CLOSE_W: f32 = 24.0;
 /// The tab button under the pointer last frame (0: none): its usage chip shows.
 static HOVERED_TAB: AtomicU64 = AtomicU64::new(0);
+
+/// A close guard extends slightly into the label. Freeze the existing expansion
+/// while crossing it, so both a compact and an expanded tab keep their X in place.
+fn usage_hover(rect: egui::Rect, pointer: Option<egui::Pos2>, expanded: bool) -> bool {
+    let Some(pos) = pointer.filter(|p| rect.contains(*p)) else { return false };
+    if pos.x >= rect.right() - DOCK_CLOSE_W - 12.0 { expanded } else { true }
+}
 
 /// Per-frame inputs for pane dimming, outlines and focus handling.
 #[derive(Default, Clone)]
@@ -442,7 +442,8 @@ impl Viewer {
 fn agent_title(name: &str, kind: AgentKind, state: Option<AgentState>, uid: u64) -> AgentTitle {
     use egui::text::{LayoutJob, TextFormat};
     let mut job = LayoutJob::default();
-    let format = |size: f32, color: egui::Color32| TextFormat { font_id: egui::FontId::proportional(size), color, valign: egui::Align::Center, ..Default::default() };
+    let format =
+        |size: f32, color: egui::Color32| TextFormat { font_id: egui::FontId::proportional(size), color, valign: egui::Align::Center, ..Default::default() };
     job.append(name, ICON_SLOT, format(12.5, egui::Color32::PLACEHOLDER));
     let mut pill = None;
     if let Some(state) = state
@@ -476,11 +477,7 @@ impl egui_dock::TabViewer for Viewer {
         }
         let icon = tab.icon();
         agent_badge::append_title_mark(&mut job, tab.uid, tab.status_color(), self.time);
-        let label = if tab.linked_sftp.is_some() {
-            format!("{icon}  {name}  · 📁")
-        } else {
-            format!("{icon}  {name}")
-        };
+        let label = if tab.linked_sftp.is_some() { format!("{icon}  {name}  · 📁") } else { format!("{icon}  {name}") };
         RichText::new(label).size(12.5).append_to(&mut job, &egui::Style::default(), egui::FontSelection::Default, egui::Align::Center);
         if tab.is_local() {
             usage_chip::append_to_title(&mut job, tab.uid, HOVERED_TAB.load(Ordering::Relaxed) == tab.uid);
@@ -501,14 +498,14 @@ impl egui_dock::TabViewer for Viewer {
             ui.add_space((1.0 - eased) * 10.0);
         }
         let is_local = tab.is_local();
+        let images_enabled = tab.agent().is_some_and(|a| matches!(a.kind, AgentKind::Claude | AgentKind::Codex));
         let tab_uid = tab.uid;
         let profile = tab.profile.clone();
         match &mut tab.body {
             TabBody::Terminal(view) => {
+                view.images_enabled = images_enabled;
                 if is_local {
-                    if let Some(cwd) = crate::agents::hub::agent_cwd(tab_uid)
-                        .or_else(|| crate::procmon::usage_for(tab_uid).and_then(|u| u.cwd.clone()))
-                    {
+                    if let Some(cwd) = crate::agents::hub::agent_cwd(tab_uid).or_else(|| crate::procmon::usage_for(tab_uid).and_then(|u| u.cwd.clone())) {
                         view.fallback_cwd = Some(cwd);
                     }
                 } else {
@@ -544,6 +541,9 @@ impl egui_dock::TabViewer for Viewer {
                     if !out.input.is_empty() {
                         self.inputs.push((tab_uid, out.input));
                     }
+                    for folder in out.open_folders {
+                        self.open_folders.push((tab_uid, folder));
+                    }
                     if !out.open_files.is_empty() {
                         self.open_files.push((tab_uid, out.open_files));
                     }
@@ -566,11 +566,7 @@ impl egui_dock::TabViewer for Viewer {
                     {
                         linked.split_fraction = ((pos.x - avail.left()) / avail.width().max(1.0)).clamp(0.2, 0.8);
                     }
-                    let sep_col = if sep_resp.hovered() || sep_resp.dragged() {
-                        theme::accent()
-                    } else {
-                        theme::border().gamma_multiply(0.55)
-                    };
+                    let sep_col = if sep_resp.hovered() || sep_resp.dragged() { theme::accent() } else { theme::border().gamma_multiply(0.55) };
                     ui.painter().vline(sep_rect.center().x, sep_rect.y_range(), egui::Stroke::new(1.5, sep_col));
 
                     // 3. Linked SFTP on the right (with draggable header to separate/minimize/close)
@@ -582,15 +578,7 @@ impl egui_dock::TabViewer for Viewer {
                     let mut detach_linked = None;
                     let mut minimize_linked = false;
 
-                    paint_linked_sftp_header(
-                        ui,
-                        tab_uid,
-                        &profile,
-                        header_rect,
-                        &mut close_linked,
-                        &mut detach_linked,
-                        &mut minimize_linked,
-                    );
+                    paint_linked_sftp_header(ui, tab_uid, &profile, header_rect, &mut close_linked, &mut detach_linked, &mut minimize_linked);
 
                     let mut sftp_ui = ui.new_child(egui::UiBuilder::new().max_rect(sftp_body_rect).id_salt(("linked_sftp", tab_uid)));
                     sftp_ui.set_clip_rect(sftp_body_rect.intersect(ui.clip_rect()));
@@ -612,6 +600,9 @@ impl egui_dock::TabViewer for Viewer {
                     let out = view.ui(ui, &profile);
                     if !out.input.is_empty() {
                         self.inputs.push((tab_uid, out.input));
+                    }
+                    for folder in out.open_folders {
+                        self.open_folders.push((tab_uid, folder));
                     }
                     if !out.open_files.is_empty() {
                         self.open_files.push((tab_uid, out.open_files));
@@ -659,10 +650,11 @@ impl egui_dock::TabViewer for Viewer {
 
     fn on_tab_button(&mut self, tab: &mut Tab, response: &egui::Response) {
         let hovered = HOVERED_TAB.load(Ordering::Relaxed);
-        if response.hovered() && hovered != tab.uid {
+        let over = usage_hover(response.rect, response.ctx.pointer_hover_pos(), hovered == tab.uid);
+        if over && hovered != tab.uid {
             HOVERED_TAB.store(tab.uid, Ordering::Relaxed);
             response.ctx.request_repaint();
-        } else if !response.hovered() && hovered == tab.uid {
+        } else if !over && hovered == tab.uid {
             HOVERED_TAB.store(0, Ordering::Relaxed);
             response.ctx.request_repaint();
         }
@@ -754,9 +746,7 @@ fn paint_linked_sftp_header(
     let buttons_w = 72.0;
     let drag_rect = egui::Rect::from_min_max(rect.min, egui::pos2((rect.right() - buttons_w).max(rect.left() + 20.0), rect.bottom()));
     let drag_id = ui.id().with(("linked_sftp_hdr_drag", tab_uid));
-    let drag_resp = ui
-        .interact(drag_rect, drag_id, egui::Sense::click_and_drag())
-        .on_hover_text("Linked SFTP · Drag to separate into an independent window");
+    let drag_resp = ui.interact(drag_rect, drag_id, egui::Sense::click_and_drag()).on_hover_text("Linked SFTP · Drag to separate into an independent window");
     if drag_resp.hovered() || drag_resp.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
@@ -771,11 +761,7 @@ fn paint_linked_sftp_header(
     let label = format!("📁  SFTP · {}", profile.display_name());
     let galley = ui.painter().layout_no_wrap(label, egui::FontId::proportional(11.5), theme::text());
     ui.painter().circle_filled(egui::pos2(rect.left() + 10.0, rect.center().y), 3.0, tint);
-    ui.painter().galley(
-        egui::pos2(rect.left() + 18.0, rect.center().y - galley.size().y * 0.5),
-        galley,
-        theme::text(),
-    );
+    ui.painter().galley(egui::pos2(rect.left() + 18.0, rect.center().y - galley.size().y * 0.5), galley, theme::text());
 
     // Header buttons: Minimize (`—`), Separate/Pop-out (`🗗`), Close (`✕`)
     let btn_size = egui::vec2(20.0, 18.0);
@@ -864,6 +850,18 @@ fn shorten_path(path: &str, home: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_zone_freezes_both_compact_and_expanded_tabs() {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 28.0));
+        for x in [125.0, 140.0, 158.0] {
+            assert!(!usage_hover(rect, Some(egui::pos2(x, 14.0)), false));
+            assert!(usage_hover(rect, Some(egui::pos2(x, 14.0)), true));
+        }
+        assert!(usage_hover(rect, Some(egui::pos2(50.0, 14.0)), false));
+        assert!(!usage_hover(rect, Some(egui::pos2(50.0, 40.0)), true));
+        assert!(!usage_hover(rect, None, true));
+    }
 
     #[test]
     fn context_lines_add_the_branch() {

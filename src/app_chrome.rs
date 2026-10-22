@@ -92,7 +92,10 @@ impl TetherApp {
                 if !sidebar_right {
                     sidebar_toggle(ui);
                 }
-                if narrow && icon_btn(ui, Icon::Search, ButtonTone::Normal, "Command palette", &keybindings::hint("Search or run a command", Action::CommandPalette)).clicked() {
+                if narrow
+                    && icon_btn(ui, Icon::Search, ButtonTone::Normal, "Command palette", &keybindings::hint("Search or run a command", Action::CommandPalette))
+                        .clicked()
+                {
                     self.open_palette();
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -134,8 +137,9 @@ impl TetherApp {
                 self.open_palette();
             }
             ui.separator();
-            if item(ui, "Import hosts…", None) {
+            if item(ui, "Import / export setup…", None) {
                 self.import = Some(ImportDialog::new(&self.store));
+                ui.close();
             }
             if item(ui, "Key manager…", Some(Action::KeyManager)) {
                 self.run_action(Action::KeyManager, &ctx);
@@ -144,6 +148,9 @@ impl TetherApp {
             ui.menu_button(RichText::new("Layout").size(12.5), |ui| self.layout_menu(ui));
             if item(ui, "Agent sessions", Some(Action::ToggleAgents)) {
                 self.toggle_agents();
+            }
+            if item(ui, "Codex sessions", Some(Action::ToggleCodex)) {
+                self.run_action(Action::ToggleCodex, &ctx);
             }
             if item(ui, "Settings…", Some(Action::OpenSettings)) {
                 self.run_action(Action::OpenSettings, &ctx);
@@ -180,7 +187,8 @@ impl TetherApp {
         if !keys.is_empty() {
             // A key cap, so the shortcut reads as a hint rather than as more text.
             let galley = p.layout_no_wrap(keys, FontId::monospace(10.5), theme::text_dim());
-            let cap = Rect::from_min_size(Pos2::new(rect.right() - 6.0 - galley.size().x - 12.0, rect.center().y - 9.0), Vec2::new(galley.size().x + 12.0, 18.0));
+            let cap =
+                Rect::from_min_size(Pos2::new(rect.right() - 6.0 - galley.size().x - 12.0, rect.center().y - 9.0), Vec2::new(galley.size().x + 12.0, 18.0));
             p.rect(cap, CornerRadius::same(5), theme::surface_3().gamma_multiply(0.8), Stroke::new(1.0, theme::border()), egui::StrokeKind::Inside);
             p.galley(Pos2::new(cap.left() + 6.0, cap.center().y - galley.size().y / 2.0), galley, theme::text_dim());
         }
@@ -212,7 +220,9 @@ impl TetherApp {
             ui.label(RichText::new("Primary on the").size(12.0).color(theme::text_dim()));
             w::segmented(ui, &mut l.sidebar_side, &[(Side::Left, "Left"), (Side::Right, "Right")]);
         });
-        for (c, action) in [(Container::Primary, Action::ToggleSidebar), (Container::Secondary, Action::ToggleSecondarySidebar), (Container::Panel, Action::TogglePanel)] {
+        for (c, action) in
+            [(Container::Primary, Action::ToggleSidebar), (Container::Secondary, Action::ToggleSecondarySidebar), (Container::Panel, Action::TogglePanel)]
+        {
             let state = l.views.get_mut(c);
             let mut open = !state.collapsed;
             let label = if state.is_empty() { format!("{} (empty)", c.title()) } else { c.title().to_string() };

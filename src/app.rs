@@ -19,10 +19,10 @@ mod chrome;
 mod layout_ui;
 #[path = "app_local.rs"]
 mod local;
-#[path = "app_views.rs"]
-mod views_ui;
 #[path = "app_palette.rs"]
 mod palette_ui;
+#[path = "app_views.rs"]
+mod views_ui;
 
 use crate::folders::FolderStore;
 use crate::keybindings::{self, Action};
@@ -37,14 +37,14 @@ use crate::ui::detach::Detacher;
 use crate::ui::editor::ProfileEditor;
 use crate::ui::import_view::{ImportDialog, ImportOutcome};
 use crate::ui::key_manager::KeyManager;
+use crate::ui::palette::Palette;
 use crate::ui::settings_view::SettingsView;
 use crate::ui::sftp_view::SftpView;
-use crate::ui::palette::Palette;
 use crate::ui::sidebar::{OpenKind, Sidebar, WorkspaceInfo};
 use crate::ui::tabs::{Tab, TabBody, Viewer};
-use crate::ui::vertical_tabs::VerticalTabs;
 use crate::ui::terminal_view::TerminalView;
 use crate::ui::toast::Toasts;
+use crate::ui::vertical_tabs::VerticalTabs;
 use crate::workspace::{self, LAST_SESSION, TabKind, Workspaces};
 
 /// Password / passphrase asked before connecting (nothing stored, no live connection).
@@ -87,6 +87,8 @@ pub struct TetherApp {
     broadcast: bool,
     editor: Option<ProfileEditor>,
     import: Option<ImportDialog>,
+    custom_boot: Option<crate::ui::agents_panel::CustomBoot>,
+    project_cwds: std::collections::HashMap<u64, String>,
     settings_view: Option<SettingsView>,
     key_manager: Option<KeyManager>,
     prompt: Option<Prompt>,
@@ -176,6 +178,8 @@ impl TetherApp {
             detached: Detacher::default(),
             mini_dock: Default::default(),
             agents,
+            custom_boot: None,
+            project_cwds: Default::default(),
         })
     }
 
@@ -212,10 +216,7 @@ impl TetherApp {
             }
             OpenKind::Sftp => {
                 let can_attach = self.dock.find_active_focused().is_some_and(|(_, active)| {
-                    !active.is_local()
-                        && active.profile.id == profile.id
-                        && matches!(active.body, TabBody::Terminal(_))
-                        && active.linked_sftp.is_none()
+                    !active.is_local() && active.profile.id == profile.id && matches!(active.body, TabBody::Terminal(_)) && active.linked_sftp.is_none()
                 });
                 if can_attach {
                     let view = self.spawn_sftp(&profile, secret, ctx);
@@ -246,6 +247,7 @@ impl TetherApp {
     }
 
     fn spawn_terminal(&self, profile: &Profile, secret: Option<String>, ctx: &egui::Context) -> TerminalView {
+        let image_target = crate::ui::attachments::RemoteTarget { pool: self.pool.clone(), profile: profile.clone(), runtime: self.rt.handle().clone() };
         let (handle, rx) = TerminalHandle::new(24, 80);
         // Wakes the UI even if this tab is never drawn (restored workspace, background tab).
         handle.repaint.attach(ctx);
@@ -275,7 +277,9 @@ impl TetherApp {
             }
             ctx.request_repaint();
         });
-        TerminalView::new(handle)
+        let mut view = TerminalView::new(handle);
+        view.attachments().remote = Some(image_target);
+        view
     }
 
     fn terminal_tab(&self, profile: &Profile, secret: Option<String>, ctx: &egui::Context) -> Tab {
@@ -305,12 +309,8 @@ impl TetherApp {
                 tab.linked_sftp = None;
                 return;
             }
-            let profile = self.store.get(tab.profile.id).cloned().unwrap_or_else(|| tab.profile.clone());
-            let secret = secret::get(profile.secret_id());
-            let view = self.spawn_sftp(&profile, secret, ctx);
-            if let Some((_, active)) = self.dock.find_active_focused() {
-                active.linked_sftp = Some(crate::ui::tabs::LinkedSftp::new(view));
-            }
+            let uid = tab.uid;
+            let _ = self.ensure_linked_sftp(uid, ctx);
             return;
         }
         self.duplicate_focused(Split::Right, TabKind::Sftp, ctx);
@@ -331,13 +331,7 @@ impl TetherApp {
         }
         let secret = secret_override.or_else(|| secret::get(profile.secret_id()));
         let new_view = is_terminal.then(|| self.spawn_terminal(&profile, secret.clone(), ctx));
-        let Some(tab) = self
-            .dock
-            .iter_all_tabs_mut()
-            .map(|(_, t)| t)
-            .chain(self.detached.tabs_mut())
-            .chain(self.mini_dock.tabs_mut())
-            .find(|t| t.uid == uid)
+        let Some(tab) = self.dock.iter_all_tabs_mut().map(|(_, t)| t).chain(self.detached.tabs_mut()).chain(self.mini_dock.tabs_mut()).find(|t| t.uid == uid)
         else {
             return;
         };
@@ -431,6 +425,9 @@ impl TetherApp {
         self.route_input(viewer.inputs);
         for uid in viewer.reconnect {
             self.reconnect(uid, None, ctx);
+        }
+        for (uid, path) in viewer.open_folders {
+            self.open_terminal_folder(uid, path, ctx);
         }
         for (uid, files) in viewer.open_files {
             self.open_terminal_files(uid, files, ctx);
@@ -613,6 +610,9 @@ impl TetherApp {
             for uid in viewer.reconnect {
                 self.reconnect(uid, None, ui.ctx());
             }
+            for (uid, path) in viewer.open_folders {
+                self.open_terminal_folder(uid, path, ui.ctx());
+            }
             for (uid, files) in viewer.open_files {
                 self.open_terminal_files(uid, files, ui.ctx());
             }
@@ -657,11 +657,7 @@ impl TetherApp {
     /// away to another terminal hides the right-hand SFTP automatically.
     fn absorb_same_server_sftp_splits(&mut self) {
         let mut pairs: Vec<(u64, u64)> = Vec::new();
-        let leaves: Vec<_> = self
-            .dock
-            .iter_leaves()
-            .filter(|(p, l)| p.surface.is_main() && !l.tabs.is_empty())
-            .collect();
+        let leaves: Vec<_> = self.dock.iter_leaves().filter(|(p, l)| p.surface.is_main() && !l.tabs.is_empty()).collect();
         if leaves.len() < 2 {
             return;
         }
@@ -706,6 +702,34 @@ impl TetherApp {
         }
     }
 
+    /// Both the shortcut and path links use this companion pane, owned by the source terminal.
+    fn ensure_linked_sftp(&mut self, uid: u64, ctx: &egui::Context) -> Option<&mut SftpView> {
+        let (profile, terminal, already_open) = self.all_tabs().find_map(|t| match &t.body {
+            TabBody::Terminal(term) if t.uid == uid && !t.is_local() => Some((t.profile.clone(), term.handle.clone(), t.linked_sftp.is_some())),
+            _ => None,
+        })?;
+        let new_view = if already_open {
+            None
+        } else {
+            let profile = self.store.get(profile.id).cloned().unwrap_or(profile);
+            Some(self.spawn_sftp(&profile, secret::get(profile.secret_id()), ctx))
+        };
+        let tab = self.dock.iter_all_tabs_mut().map(|(_, t)| t).chain(self.detached.tabs_mut()).chain(self.mini_dock.tabs_mut()).find(|t| t.uid == uid)?;
+        if let Some(view) = new_view {
+            tab.linked_sftp = Some(crate::ui::tabs::LinkedSftp::new(view));
+        }
+        let view = tab.linked_sftp.as_mut()?.view.as_mut();
+        view.set_linked_terminal(Some(terminal));
+        Some(view)
+    }
+
+    fn open_terminal_folder(&mut self, uid: u64, path: String, ctx: &egui::Context) {
+        if let Some(view) = self.ensure_linked_sftp(uid, ctx) {
+            view.browse_path(path);
+            ctx.request_repaint();
+        }
+    }
+
     /// Opens files requested from a terminal (`nano <file>`) in the built-in editor.
     fn open_terminal_files(&mut self, uid: u64, files: Vec<String>, ctx: &egui::Context) {
         // Local shells edit files with their own tools: only remote ones go through SFTP.
@@ -745,14 +769,12 @@ impl TetherApp {
                 }
             };
             for file in files {
-                let raw_path = if file == "~" {
-                    home.clone()
-                } else if let Some(rest) = file.strip_prefix("~/") {
-                    crate::ssh::sftp::join(&home, rest)
-                } else if file.starts_with('/') {
-                    file
-                } else {
-                    crate::ssh::sftp::join(&cwd, &file)
+                let raw_path = match crate::ssh::cwd::resolve_path(&conn, &sftp, &file, &cwd).await {
+                    Ok(path) => path,
+                    Err(e) => {
+                        toasts.error(format!("Could not resolve remote path: {e:#}"));
+                        continue;
+                    }
                 };
                 let remote_path = crate::ui::path_complete::normalize_remote(&raw_path);
                 let read = match crate::remote_edit::read_capped(&sftp, &remote_path, crate::remote_edit::MAX_EDITOR_BYTES).await {
@@ -782,6 +804,7 @@ impl TetherApp {
     }
 
     fn modals(&mut self, ctx: &egui::Context) {
+        self.custom_boot_modal(ctx);
         self.editor_modal(ctx);
         self.key_manager_modal(ctx);
         self.import_modal(ctx);
@@ -1010,4 +1033,3 @@ fn is_no_such_file(err: &anyhow::Error) -> bool {
         )
     })
 }
-

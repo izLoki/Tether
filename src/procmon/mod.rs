@@ -38,14 +38,11 @@ pub struct Snapshot {
 
 /// What the UI shows of a usage (see [`Usage::visible_key`]).
 type VisibleKey = (i32, u64, Option<AgentKind>);
+type VisibleTab = (u64, VisibleKey, bool, Option<String>);
 
 impl Snapshot {
-    fn visible_keys(&self) -> (Vec<(u64, VisibleKey, bool, Option<String>)>, VisibleKey) {
-        let mut v: Vec<_> = self
-            .per_tab
-            .iter()
-            .map(|(k, u)| (*k, u.visible_key(), u.subprocs_busy, u.cwd.clone()))
-            .collect();
+    fn visible_keys(&self) -> (Vec<VisibleTab>, VisibleKey) {
+        let mut v: Vec<_> = self.per_tab.iter().map(|(k, u)| (*k, u.visible_key(), u.subprocs_busy, u.cwd.clone())).collect();
         v.sort_unstable_by_key(|(k, ..)| *k);
         (v, self.total.visible_key())
     }
@@ -210,11 +207,7 @@ impl Sampler {
         // know the live working directory even when OSC 7 is off.
         let watched_pids: Vec<Pid> = watch.values().copied().map(Pid::from_u32).collect();
         if !watched_pids.is_empty() {
-            self.sys.refresh_processes_specifics(
-                ProcessesToUpdate::Some(&watched_pids),
-                false,
-                ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always),
-            );
+            self.sys.refresh_processes_specifics(ProcessesToUpdate::Some(&watched_pids), false, ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always));
         }
         // Command lines only for launchers in our trees we have not classified yet.
         let mut unknown = Vec::new();

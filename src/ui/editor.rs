@@ -67,6 +67,7 @@ pub struct ProfileEditor {
     user_ac: AutoField,
     host_ac: AutoField,
     test: TestSlot,
+    key_search: Option<super::key_search::KeySearch>,
 }
 
 pub enum EditorOutcome {
@@ -111,6 +112,7 @@ impl ProfileEditor {
             user_ac: AutoField::new(egui::Id::new("editor_user_ac")),
             host_ac: AutoField::new(egui::Id::new("editor_host_ac")),
             test: Arc::new(Mutex::new(TestState::Idle)),
+            key_search: None,
         }
     }
 
@@ -165,7 +167,7 @@ impl ProfileEditor {
             form::rule(ui);
             egui::Frame::new().inner_margin(Margin::symmetric(PAD, 16)).show(ui, |ui| self.footer(ui, keys, &mut outcome));
         });
-        if modal.should_close() && matches!(outcome, EditorOutcome::Open) {
+        if modal.should_close() && self.key_search.is_none() && matches!(outcome, EditorOutcome::Open) {
             outcome = EditorOutcome::Cancel;
         }
         outcome

@@ -350,7 +350,8 @@ pub fn apply(plan: &Plan) -> Result<Option<PathBuf>, String> {
     }
     // Replace the file a symlink points to, not the link (dotfile managers link these).
     let is_link = std::fs::symlink_metadata(&plan.path).is_ok_and(|m| m.file_type().is_symlink());
-    let target = if is_link { std::fs::canonicalize(&plan.path).map_err(|e| format!("cannot follow {}: {e}", plan.path.display()))? } else { plan.path.clone() };
+    let target =
+        if is_link { std::fs::canonicalize(&plan.path).map_err(|e| format!("cannot follow {}: {e}", plan.path.display()))? } else { plan.path.clone() };
     let mut backup = None;
     if let Some(old) = &now {
         let bak = backup_path(&target);

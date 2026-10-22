@@ -123,6 +123,8 @@ __tether_preexec() {
     __tether_ran=1
 }
 
+# Insert a literal newline in Readline without accepting the command.
+bind '"\e\r": "\C-v\C-j"' 2>/dev/null
 __tether_last_hist=$(HISTTIMEFORMAT= builtin history 1)
 
 if [[ -n "${bash_preexec_imported-}${__bp_imported-}" ]]; then

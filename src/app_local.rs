@@ -83,13 +83,7 @@ impl TetherApp {
     /// after the active one.
     pub(super) fn open_local_in(&mut self, picks: Vec<(egui_dock::NodePath, &'static ShellSpec)>, ctx: &egui::Context) {
         for (path, spec) in picks {
-            let inherited_cwd = self
-                .dock
-                .leaf_mut(path)
-                .ok()
-                .and_then(|leaf| leaf.tabs.get(leaf.active.0))
-                .and_then(origin)
-                .and_then(|(_, cwd)| cwd);
+            let inherited_cwd = self.dock.leaf_mut(path).ok().and_then(|leaf| leaf.tabs.get(leaf.active.0)).and_then(origin).and_then(|(_, cwd)| cwd);
             let tab = self.local_tab(spec, inherited_cwd, ctx);
             let new_uid = tab.uid;
             match self.dock.leaf_mut(path) {
@@ -107,13 +101,7 @@ impl TetherApp {
     pub(super) fn respawn_local(&mut self, uid: u64, ctx: &egui::Context) {
         let Some((spec, cwd)) = self.all_tabs().find(|t| t.uid == uid).and_then(origin) else { return };
         let view = self.spawn_local(&spec, cwd, ctx);
-        let tab = self
-            .dock
-            .iter_all_tabs_mut()
-            .map(|(_, t)| t)
-            .chain(self.detached.tabs_mut())
-            .chain(self.mini_dock.tabs_mut())
-            .find(|t| t.uid == uid);
+        let tab = self.dock.iter_all_tabs_mut().map(|(_, t)| t).chain(self.detached.tabs_mut()).chain(self.mini_dock.tabs_mut()).find(|t| t.uid == uid);
         if let Some(Tab { body: TabBody::Terminal(old), .. }) = tab {
             *old = view;
         }
@@ -126,18 +114,8 @@ pub(super) fn origin(tab: &Tab) -> Option<(ShellSpec, Option<PathBuf>)> {
     let spec = tab.local.clone()?;
     let cwd = match &tab.body {
         TabBody::Terminal(t) => {
-            let (osc_cwd, pid) = t
-                .handle
-                .shared
-                .lock()
-                .ok()
-                .map(|s| (s.parser.callbacks().cwd.clone(), s.pid))
-                .unwrap_or((None, None));
-            crate::agents::hub::agent_cwd(tab.uid)
-                .or(osc_cwd)
-                .or_else(|| pid.and_then(live_pid_cwd))
-                .or_else(|| tab.current_cwd())
-                .map(PathBuf::from)
+            let (osc_cwd, pid) = t.handle.shared.lock().ok().map(|s| (s.parser.callbacks().cwd.clone(), s.pid)).unwrap_or((None, None));
+            crate::agents::hub::agent_cwd(tab.uid).or(osc_cwd).or_else(|| pid.and_then(live_pid_cwd)).or_else(|| tab.current_cwd()).map(PathBuf::from)
         }
         _ => None,
     };
@@ -148,13 +126,6 @@ fn live_pid_cwd(pid: u32) -> Option<String> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
     let target = Pid::from_u32(pid);
     let mut sys = System::new();
-    sys.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[target]),
-        true,
-        ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always),
-    );
-    sys.process(target)?
-        .cwd()
-        .map(|p| p.to_string_lossy().into_owned())
-        .filter(|s| !s.is_empty())
+    sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[target]), true, ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always));
+    sys.process(target)?.cwd().map(|p| p.to_string_lossy().into_owned()).filter(|s| !s.is_empty())
 }

@@ -79,7 +79,7 @@ fn ui_flows() {
     // Import dialog (auto-detects Bitvise profiles / SSH config on this machine).
     h.get_by_label_contains("Import from Bitvise").click();
     h.run_steps(10);
-    h.get_by_label("Import hosts");
+    h.get_by_label("Import / export machines");
     shot(&mut h, "02b-import");
     h.get_by_label("Cancel").click();
     h.run_steps(10);
@@ -178,7 +178,7 @@ fn sidebar_menus(h: &mut Harness<'_, TetherApp>) {
 
     h.get_by_label("New menu").click();
     h.run_steps(10);
-    h.get_by_label_contains("Import hosts");
+    h.get_by_label_contains("Import / export setup");
     shot(h, "09-new-menu");
     h.key_press(Key::Escape);
     h.run_steps(10);

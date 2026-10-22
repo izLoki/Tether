@@ -70,10 +70,7 @@ fn format_panic_report(info: &PanicHookInfo<'_>, backtrace: &str) -> String {
     let arch = std::env::consts::ARCH;
     let thread = std::thread::current();
     let thread_name = thread.name().unwrap_or("<unnamed>");
-    let location = info
-        .location()
-        .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-        .unwrap_or_else(|| "<unknown location>".to_string());
+    let location = info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_else(|| "<unknown location>".to_string());
     let message = panic_payload_message(info);
 
     format!(

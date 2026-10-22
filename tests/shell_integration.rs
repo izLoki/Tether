@@ -61,6 +61,33 @@ fn local_shell_reports_blocks_with_exit_codes_and_cwd() {
     scenario(shell(), FAIL_3);
 }
 
+#[test]
+fn shift_enter_inserts_a_line_and_clear_removes_old_blocks() {
+    let (handle, rx) = TerminalHandle::new(30, 120);
+    let spec = shell();
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_path_buf();
+    let h = handle.clone();
+    let runner = std::thread::spawn(move || run_local_pty(&spec, Some(cwd), h, rx, |_| {}));
+    wait_for(&handle, "prompt", |b| b.last().is_some_and(|b| b.phase == Phase::Prompt));
+    handle.send(b"echo first_line".to_vec());
+    let shifted = tether::ui::keys::encode(eframe::egui::Key::Enter, eframe::egui::Modifiers::SHIFT, false).unwrap();
+    handle.send(shifted);
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(done(&blocks(&handle)).is_empty(), "Shift+Enter submitted the command");
+    handle.send(b"echo second_line\r".to_vec());
+    wait_for(&handle, "multiline command", |b| !done(b).is_empty());
+    let command = blocks(&handle).into_iter().find(|b| b.phase == Phase::Done).unwrap().command.unwrap();
+    assert!(command.contains("first_line") && command.contains("second_line") && command.contains('\n'), "{command:?}");
+    #[cfg(windows)]
+    handle.send(b"cls\r".to_vec());
+    #[cfg(unix)]
+    handle.send(b"clear\r".to_vec());
+    wait_for(&handle, "clear to erase old decorations", |b| b.iter().all(|b| b.command.as_deref().is_none_or(|c| !c.contains("first_line"))));
+    handle.close();
+    runner.join().unwrap().unwrap();
+}
+
 /// Git Bash through ConPTY (skipped when Git for Windows is not installed).
 #[cfg(windows)]
 #[test]

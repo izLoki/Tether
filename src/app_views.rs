@@ -42,7 +42,7 @@ impl Host<'_, '_> {
             View::Hosts => Some(Sidebar::host_count(self.data)),
             View::Sessions => Some(self.dock.iter_all_tabs().count() + self.vtabs.extra_rows.len()),
             View::Workspaces => Some(self.data.workspaces.len()),
-            View::Agents => Some(self.agents.len()),
+            View::Agents | View::Codex => Some(self.agents.iter().filter(|s| v.includes_agent(s.kind)).count()),
         }
     }
 
@@ -58,7 +58,23 @@ impl Host<'_, '_> {
                 self.tab_actions.extend(a);
             }
             View::Workspaces => self.sidebar.workspaces_header(ui, self.data),
-            View::Agents => {}
+            View::Agents | View::Codex => {
+                if crate::ui::settings_widgets::icon_button(ui, crate::ui::settings_widgets::Icon::Plus, 24.0).on_hover_text("Launch agent").clicked() {
+                    let kind = v.agent().unwrap();
+                    self.agent_action = Some(PanelAction::Launch(agents_panel::LaunchPick {
+                        kind,
+                        command: agents_panel::default_command(kind).into(),
+                        shell_id: None,
+                        cwd: None,
+                    }));
+                }
+                if crate::ui::settings_widgets::icon_button(ui, crate::ui::settings_widgets::Icon::Gear, 24.0)
+                    .on_hover_text("Agent settings and hooks")
+                    .clicked()
+                {
+                    self.agent_action = Some(PanelAction::InstallHooks);
+                }
+            }
         }
     }
 
@@ -78,9 +94,11 @@ impl Host<'_, '_> {
                     self.actions.extend(a);
                 });
             }
-            View::Agents => {
-                egui::ScrollArea::vertical().id_salt(("view_agents", in_panel)).auto_shrink([false, false]).show(ui, |ui| {
-                    self.agent_action = agents_panel::list(ui, self.agents, std::time::Instant::now());
+            View::Agents | View::Codex => {
+                egui::ScrollArea::vertical().id_salt(("view_agents", v, in_panel)).auto_shrink([false, false]).show(ui, |ui| {
+                    if let Some(action) = agents_panel::list_for(ui, self.agents, v, std::time::Instant::now()) {
+                        self.agent_action = Some(action);
+                    }
                 });
                 // Elapsed times tick while sessions are listed.
                 if !self.agents.is_empty() {
@@ -98,7 +116,13 @@ impl Host<'_, '_> {
         let w = galley.size().x;
         p.galley(Pos2::new(rect.left() + 4.0, rect.center().y - galley.size().y / 2.0), galley, theme::text_faint());
         if let Some(n) = self.count(v).filter(|n| *n > 0) {
-            p.text(Pos2::new(rect.left() + 4.0 + w + 6.0, rect.center().y), Align2::LEFT_CENTER, n.to_string(), FontId::proportional(10.5), theme::text_faint().gamma_multiply(0.7));
+            p.text(
+                Pos2::new(rect.left() + 4.0 + w + 6.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                n.to_string(),
+                FontId::proportional(10.5),
+                theme::text_faint().gamma_multiply(0.7),
+            );
         }
         let mut buttons = ui.new_child(UiBuilder::new().max_rect(rect).layout(egui::Layout::right_to_left(egui::Align::Center)));
         self.header_buttons(v, &mut buttons);
@@ -154,13 +178,17 @@ impl TetherApp {
             });
         }
         let tabs = self.dock.iter_all_tabs().count() + self.vtabs.extra_rows.len();
-        let waiting = self.agents.attention_count();
-        // The badge takes the status colour of the most urgent session.
-        let urgent = self.agents.sessions().iter().map(|s| s.state).filter(|s| s.needs_attention()).min_by_key(|s| s.urgency());
-        let attention_tone = Some(urgent.map_or(theme::warn(), |s| crate::ui::agent_status::tone_color(crate::ui::agent_status::spec(s).tone)));
+        let agent_badge = |view: View| {
+            let sessions = self.agents.sessions().iter().filter(|s| view.includes_agent(s.kind));
+            let count = sessions.clone().filter(|s| s.state.needs_attention()).count();
+            let urgent = sessions.map(|s| s.state).filter(|s| s.needs_attention()).min_by_key(|s| s.urgency());
+            Badge { count, tone: Some(urgent.map_or(theme::warn(), |s| crate::ui::agent_status::tone_color(crate::ui::agent_status::spec(s).tone))) }
+        };
+        let badges = [agent_badge(View::Agents), agent_badge(View::Codex)];
         let badge = move |v: View| match v {
             View::Sessions => Some(Badge { count: tabs, tone: None }),
-            View::Agents => Some(Badge { count: waiting, tone: attention_tone }),
+            View::Agents => Some(badges[0]),
+            View::Codex => Some(badges[1]),
             View::Hosts | View::Workspaces => None,
         };
         let mut host = Host {
@@ -207,6 +235,8 @@ impl TetherApp {
                     self.settings_view.get_or_insert_with(SettingsView::new);
                 }
                 ViewEvent::Reset => reset_layout(ctx),
+                ViewEvent::LaunchAgent(kind) => self.launch_agent_command(kind, crate::ui::agents_panel::default_command(kind).into(), ctx),
+                ViewEvent::CustomBoot(kind) => self.custom_boot = Some(crate::ui::agents_panel::CustomBoot::new(kind)),
                 e => {
                     let _ = settings::update(|s| apply_to(&mut s.layout, e));
                 }
@@ -224,7 +254,7 @@ fn apply_to(l: &mut LayoutSettings, e: ViewEvent) {
         ViewEvent::Reveal(view) => v.reveal(view),
         ViewEvent::Toggle(c) => v.toggle(c),
         ViewEvent::SetBar(c, bar) => v.get_mut(c).bar = bar,
-        ViewEvent::Reset | ViewEvent::OpenSettings => {}
+        ViewEvent::Reset | ViewEvent::OpenSettings | ViewEvent::LaunchAgent(_) | ViewEvent::CustomBoot(_) => {}
     }
 }
 
@@ -318,12 +348,20 @@ fn panel_container(ui: &mut Ui, f: &mut Frame<'_>, host: &mut Host<'_, '_>) {
     let r = egui::Panel::show_switched(ui, &mut open, collapsed, expanded, |ui, expanded| {
         let (tabs, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), activity::TABS_H), Sense::hover());
         let full = ui.max_rect();
-        ui.painter().hline(full.expand2(Vec2::new(f32::from(PAD), 0.0)).x_range(), full.top() + 0.5, egui::Stroke::new(1.0, theme::border().gamma_multiply(0.45)));
+        ui.painter().hline(
+            full.expand2(Vec2::new(f32::from(PAD), 0.0)).x_range(),
+            full.top() + 0.5,
+            egui::Stroke::new(1.0, theme::border().gamma_multiply(0.45)),
+        );
         let strip = Strip { container: Container::Panel, state, hidden: &f.l.views.hidden, style: StripStyle::Tabs, marker_right: false, badge: f.badge };
         let strip_w = strip_width(ui, state, f.badge).min(tabs.width() * 0.6);
         strip.show(ui, Rect::from_min_size(tabs.min, Vec2::new(strip_w, tabs.height())), f.targets, &mut f.events);
         // Right side: the view's own buttons, then fold / unfold.
-        let mut right = ui.new_child(UiBuilder::new().max_rect(Rect::from_min_max(Pos2::new(tabs.left() + strip_w, tabs.top()), tabs.max)).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        let mut right = ui.new_child(
+            UiBuilder::new()
+                .max_rect(Rect::from_min_max(Pos2::new(tabs.left() + strip_w, tabs.top()), tabs.max))
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        );
         right.spacing_mut().item_spacing.x = 2.0;
         let tip = crate::keybindings::hint(if expanded { "Fold panel" } else { "Unfold panel" }, crate::keybindings::Action::TogglePanel);
         if fold_button(&mut right, expanded).on_hover_text(tip).clicked() {

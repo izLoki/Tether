@@ -1,6 +1,6 @@
-//! Painted marks for AI agents (no bitmap or trademark assets): Claude Code's orange
-//! starburst, Codex' hexagon knot and a sparkle for the rest. Drawn with the painter,
-//! so they stay crisp at 14–16 px and in every theme.
+//! Agent marks shared by the activity strip, launch cards and session rows. Claude's
+//! starburst is painted; Codex uses the OpenAI blossom from its official desktop app.
+//! The bundled SVG is rendered at the display's pixel scale and tinted for the theme.
 
 use std::f32::consts::{PI, TAU};
 
@@ -31,7 +31,7 @@ pub fn paint(p: &Painter, rect: Rect, kind: AgentKind, alpha: f32) {
     let center = rect.center();
     match kind {
         AgentKind::Claude => starburst(p, center, size * 0.5, c),
-        AgentKind::Codex => hex_knot(p, center, size * 0.46, c),
+        AgentKind::Codex => codex_mark(p, center, size * 0.46, c),
         _ => sparkle(p, center, size * 0.5, c),
     }
 }
@@ -52,12 +52,24 @@ fn starburst(p: &Painter, center: Pos2, radius: f32, c: Color32) {
     p.circle_filled(center, radius * 0.2, c);
 }
 
-/// A hexagon with an inner ring: a knot-like "⌬".
-fn hex_knot(p: &Painter, center: Pos2, radius: f32, c: Color32) {
-    let w = (radius * 0.2).clamp(1.1, 1.8);
-    let hex = |r: f32, turn: f32| -> Vec<Pos2> { (0..6).map(|i| center + Vec2::angled(TAU * i as f32 / 6.0 + turn) * r).collect() };
-    p.add(Shape::closed_line(hex(radius, PI / 6.0), Stroke::new(w, c)));
-    p.add(Shape::closed_line(hex(radius * 0.5, 0.0), Stroke::new(w * 0.9, c)));
+/// The actual brand mark, shared by the activity strip, session rows and launch cards.
+fn codex_mark(p: &Painter, center: Pos2, radius: f32, c: Color32) {
+    let rect = Rect::from_center_size(center, Vec2::splat(radius * 2.0));
+    let pixels = (rect.width() * p.ctx().pixels_per_point()).ceil().max(24.0) as u32;
+    let key = egui::Id::new(("codex_brand_mark", pixels));
+    let cached = p.ctx().data(|d| d.get_temp::<egui::TextureHandle>(key));
+    let texture = cached.unwrap_or_else(|| {
+        let image = egui_extras::image::load_svg_bytes_with_size(
+            include_bytes!("../../assets/agents/codex.svg"),
+            egui::load::SizeHint::Height(pixels),
+            &Default::default(),
+        )
+        .expect("bundled Codex brand SVG");
+        let texture = p.ctx().load_texture(format!("codex-brand-{pixels}"), image, egui::TextureOptions::LINEAR);
+        p.ctx().data_mut(|d| d.insert_temp(key, texture.clone()));
+        texture
+    });
+    p.image(texture.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), c);
 }
 
 /// A four-point star with a small companion.

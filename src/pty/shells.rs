@@ -64,7 +64,8 @@ impl ShellSpec {
             "cmd" => "cmd".into(),
             "pwsh" => {
                 // `…\PowerShell\7\pwsh.exe` -> "pwsh 7".
-                let version = self.program.parent().and_then(|d| d.file_name()).and_then(|v| v.to_str()).filter(|v| v.starts_with(|c: char| c.is_ascii_digit()));
+                let version =
+                    self.program.parent().and_then(|d| d.file_name()).and_then(|v| v.to_str()).filter(|v| v.starts_with(|c: char| c.is_ascii_digit()));
                 version.map_or_else(|| "pwsh".into(), |v| format!("pwsh {v}"))
             }
             id => id.strip_prefix("wsl:").map_or_else(|| self.name.clone(), str::to_string),
@@ -196,7 +197,8 @@ fn detect() -> Vec<ShellSpec> {
     if let Some(cmd) = first_file(env_dir("ComSpec").into_iter().chain([system32.join("cmd.exe")])) {
         out.push(ShellSpec::new("cmd", "Command Prompt", cmd, &[], ShellIcon::Cmd));
     }
-    let git_roots = git_install_dir().into_iter().chain(program_files.iter().map(|pf| pf.join("Git"))).chain(env_dir("LOCALAPPDATA").map(|d| d.join(r"Programs\Git")));
+    let git_roots =
+        git_install_dir().into_iter().chain(program_files.iter().map(|pf| pf.join("Git"))).chain(env_dir("LOCALAPPDATA").map(|d| d.join(r"Programs\Git")));
     if let Some(bash) = first_file(git_roots.map(|root| root.join(r"bin\bash.exe"))) {
         out.push(ShellSpec::new("git-bash", "Git Bash", bash, &["--login", "-i"], ShellIcon::GitBash));
     }
@@ -340,7 +342,10 @@ mod tests {
 
     #[test]
     fn default_falls_back_to_first_shell() {
-        let shells = vec![ShellSpec::new("pwsh", "PowerShell", "pwsh.exe", &[], ShellIcon::PowerShell), ShellSpec::new("cmd", "Command Prompt", "cmd.exe", &[], ShellIcon::Cmd)];
+        let shells = vec![
+            ShellSpec::new("pwsh", "PowerShell", "pwsh.exe", &[], ShellIcon::PowerShell),
+            ShellSpec::new("cmd", "Command Prompt", "cmd.exe", &[], ShellIcon::Cmd),
+        ];
         assert_eq!(pick_default(&shells, "cmd").map(|s| s.id.as_str()), Some("cmd"));
         assert_eq!(pick_default(&shells, "").map(|s| s.id.as_str()), Some("pwsh"));
         assert_eq!(pick_default(&shells, "wsl:Gone").map(|s| s.id.as_str()), Some("pwsh"));

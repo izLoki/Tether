@@ -83,6 +83,11 @@ function global:__tether_hook_readline {
     $current = Get-Command PSConsoleHostReadLine -CommandType Function -ErrorAction Ignore
     if (-not $current -or $current.ScriptBlock.ToString().Contains('__tether_si')) { return }
     $s.ReadLine = $current.ScriptBlock
+    # Tether sends Meta+Enter for Shift+Enter (also understood by agent TUIs).
+    if (Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) {
+        Set-PSReadLineKeyHandler -Chord 'Alt+Enter' -Function AddLine
+        Set-PSReadLineKeyHandler -Chord 'Shift+Enter' -Function AddLine
+    }
     function global:PSConsoleHostReadLine {
         $s = $global:__tether_si
         $line = & $s.ReadLine

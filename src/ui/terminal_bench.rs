@@ -98,9 +98,7 @@ fn connected_terminal(rows: u16, cols: u16) -> TerminalView {
 fn grid_rects(sc: Scenario) -> Vec<Rect> {
     let rows = TERMINALS.div_ceil(sc.per_row);
     let cell = Vec2::new(sc.screen.x / sc.per_row as f32, sc.screen.y / rows as f32);
-    (0..TERMINALS)
-        .map(|i| Rect::from_min_size(Pos2::new((i % sc.per_row) as f32 * cell.x, (i / sc.per_row) as f32 * cell.y), cell).shrink(3.0))
-        .collect()
+    (0..TERMINALS).map(|i| Rect::from_min_size(Pos2::new((i % sc.per_row) as f32 * cell.x, (i / sc.per_row) as f32 * cell.y), cell).shrink(3.0)).collect()
 }
 
 fn frame(ctx: &egui::Context, views: &mut [TerminalView], rects: &[Rect], screen: Vec2, t: f64, profile: &Profile) -> Duration {
@@ -223,9 +221,15 @@ fn render_snapshot() {
     if let Ok(mut s) = handle.shared.lock() {
         s.state = LinkState::Connected;
         for i in 0..40 {
-            s.parser.process(format!("\x1b[3{}mline {i}\x1b[0m \x1b[1;3{}mbold\x1b[0m \x1b[2mdim\x1b[0m \x1b[3mitalic\x1b[0m \x1b[4munder\x1b[0m\r\n", i % 8, (i + 3) % 8).as_bytes());
+            s.parser.process(
+                format!("\x1b[3{}mline {i}\x1b[0m \x1b[1;3{}mbold\x1b[0m \x1b[2mdim\x1b[0m \x1b[3mitalic\x1b[0m \x1b[4munder\x1b[0m\r\n", i % 8, (i + 3) % 8)
+                    .as_bytes(),
+            );
         }
-        s.parser.process("\x1b[7m inverse \x1b[0m 漢字 wide \x1b[48;5;24m\x1b[38;5;220m 256 \x1b[0m \x1b[38;2;250;80;120m\x1b[48;2;20;60;40m truecolor \x1b[0m\r\n".as_bytes());
+        s.parser.process(
+            "\x1b[7m inverse \x1b[0m 漢字 wide \x1b[48;5;24m\x1b[38;5;220m 256 \x1b[0m \x1b[38;2;250;80;120m\x1b[48;2;20;60;40m truecolor \x1b[0m\r\n"
+                .as_bytes(),
+        );
         for i in 0..6 {
             s.parser.process(&claude_chunk(i, 96));
         }

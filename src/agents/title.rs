@@ -53,7 +53,13 @@ pub fn session_title(kind: AgentKind, raw_title: Option<&str>, cwd: Option<&str>
 /// The title a local terminal tab shows. In order: the user's name for the tab, the
 /// agent session's name while an agent runs, else what `shell` makes of the terminal
 /// title (a stale agent title is dropped, so the tab reverts once the agent quits).
-pub fn tab_title(custom: Option<&str>, agent: Option<AgentKind>, raw_title: Option<&str>, cwd: Option<&str>, shell: impl FnOnce(Option<&str>) -> String) -> String {
+pub fn tab_title(
+    custom: Option<&str>,
+    agent: Option<AgentKind>,
+    raw_title: Option<&str>,
+    cwd: Option<&str>,
+    shell: impl FnOnce(Option<&str>) -> String,
+) -> String {
     if let Some(name) = custom.map(str::trim).filter(|n| !n.is_empty()) {
         return name.to_string();
     }

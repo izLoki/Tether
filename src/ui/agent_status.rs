@@ -289,20 +289,27 @@ fn popover_body(ui: &mut egui::Ui, d: &PopoverData<'_>) -> Option<PopoverAction>
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        let jump = egui::Button::new(RichText::new("Jump to tab").size(12.0).color(theme::on_accent())).fill(theme::accent()).corner_radius(CornerRadius::same(6)).min_size(Vec2::new(0.0, 26.0));
+        let jump = egui::Button::new(RichText::new("Jump to tab").size(12.0).color(theme::on_accent()))
+            .fill(theme::accent())
+            .corner_radius(CornerRadius::same(6))
+            .min_size(Vec2::new(0.0, 26.0));
         if ui.add(jump).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             action = Some(PopoverAction::Jump(s.uid));
         }
         let unread = s.state.needs_attention();
-        let read = egui::Button::new(RichText::new("Mark as read").size(12.0)).fill(theme::surface_3()).corner_radius(CornerRadius::same(6)).min_size(Vec2::new(0.0, 26.0));
+        let read = egui::Button::new(RichText::new("Mark as read").size(12.0))
+            .fill(theme::surface_3())
+            .corner_radius(CornerRadius::same(6))
+            .min_size(Vec2::new(0.0, 26.0));
         let resp = ui.add_enabled(unread, read).on_disabled_hover_text("Nothing new in this session");
         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             action = Some(PopoverAction::MarkRead(s.uid));
         }
     });
     if !s.hooked && !d.hooks_installed && matches!(s.kind, AgentKind::Claude | AgentKind::Codex) {
-        let link = ui.add(egui::Button::new(RichText::new("Install hooks for exact status…").size(11.5).color(theme::accent())).frame(false));
-        if link.on_hover_text("State is guessed from the terminal; hooks report it exactly").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        let label = if s.kind == AgentKind::Codex { "Set up completion notifications…" } else { "Install hooks for exact status…" };
+        let link = ui.add(egui::Button::new(RichText::new(label).size(11.5).color(theme::accent())).frame(false));
+        if link.on_hover_text("Configure the agent signals Tether uses to follow this session").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             action = Some(PopoverAction::InstallHooks);
         }
     }

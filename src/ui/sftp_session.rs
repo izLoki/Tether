@@ -309,11 +309,60 @@ impl SftpView {
         None
     }
 
+    /// Resolve a terminal link using the remote cwd and metadata, never the PC's filesystem.
+    pub(super) fn resolve_location(&self, path: String, terminal: Option<crate::ssh::terminal::TerminalHandle>) {
+        let (Some(sftp), Some(session)) = (self.sftp(), self.session()) else { return };
+        let (term, profile, jump, jumping, ctx) = (terminal, self.profile.clone(), self.jump.clone(), self.jumping.clone(), self.ctx.clone());
+        let epoch = self.location_epoch.clone();
+        let request = epoch.load(Ordering::Relaxed);
+        jumping.store(true, Ordering::Relaxed);
+        self.rt.spawn(async move {
+            let found: Result<String> = async {
+                let conn = session.pool.get(&profile, secret::get(profile.secret_id())).await?;
+                let home = sftp.canonicalize(".").await?;
+                let cwd = if path.starts_with('/') || path.starts_with('~') {
+                    home.clone()
+                } else if let Some(term) = &term {
+                    let reported = term.shared.lock().ok().and_then(|s| s.parser.callbacks().cwd.clone());
+                    if let Some(cwd) = reported {
+                        cwd
+                    } else {
+                        let (age_secs, rows, cols) = term.probe_facts();
+                        crate::ssh::cwd::terminal_cwd(&conn, crate::ssh::cwd::Probe { tag: &term.tag, age_secs, rows, cols }).await?
+                    }
+                } else {
+                    home.clone()
+                };
+                let resolved = crate::ssh::cwd::resolve_path(&conn, &sftp, &path, &cwd).await?;
+                let attrs = sftp.stat(&resolved).await?;
+                let directory = if attrs.is_dir() { resolved } else { crate::ssh::sftp::parent(&resolved) };
+                sftp.canonicalize(&directory).await
+            }
+            .await;
+            if epoch.load(Ordering::Relaxed) != request {
+                return;
+            }
+            match found {
+                Ok(path) => set(&jump, |j| {
+                    if epoch.load(Ordering::Relaxed) == request {
+                        *j = Some(path);
+                    }
+                }),
+                Err(e) => session.toasts.error(format!("Could not open path in SFTP: {e:#}")),
+            }
+            jumping.store(false, Ordering::Relaxed);
+            ctx.request_repaint();
+        });
+    }
+
     /// Asks where the linked terminal is and navigates there (OSC 7 first, then /proc).
     pub(super) fn jump_to_terminal(&self) {
         let Some(term) = self.linked_terminal.clone() else { return };
+        let epoch = self.location_epoch.clone();
+        let request = epoch.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
         if let Some(cwd) = term.shared.lock().ok().and_then(|s| s.parser.callbacks().cwd.clone()) {
             set(&self.jump, |j| *j = Some(cwd));
+            self.jumping.store(false, Ordering::Relaxed);
             return;
         }
         let Some(session) = self.session() else { return };
@@ -329,8 +378,15 @@ impl SftpView {
                 crate::ssh::cwd::terminal_cwd(&conn, probe).await
             }
             .await;
+            if epoch.load(Ordering::Relaxed) != request {
+                return;
+            }
             match found {
-                Ok(path) => set(&jump, |j| *j = Some(path)),
+                Ok(path) => set(&jump, |j| {
+                    if epoch.load(Ordering::Relaxed) == request {
+                        *j = Some(path);
+                    }
+                }),
                 Err(e) => session.toasts.error(format!("{e:#}")),
             }
             jumping.store(false, Ordering::Relaxed);
@@ -395,6 +451,7 @@ pub(super) fn humanize(err: &anyhow::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use russh_sftp::protocol::Status;
 
     fn status(code: StatusCode) -> anyhow::Error {

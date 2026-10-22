@@ -16,6 +16,23 @@ A personal project: the split-pane workspace of Termius plus the SFTP speed of B
 - **Secure by default**: secrets live in the OS credential store, host keys are trusted on first use, and tether refuses to connect if a host key changes.
 - **Customisable**: themes, and every shortcut can be rebound (*Settings → Keyboard*).
 
+### Terminal and agent shortcuts
+
+- **Shift+Enter** inserts a line without submitting in Claude Code, Codex and integrated PowerShell, Bash, Zsh and Fish prompts. Enter submits normally.
+- **Images**: a local terminal running a detected Claude Code or Codex session shows **+ Image** and accepts screenshot / PNG / JPEG attachments. Ordinary shells use the full terminal height and do not show the image toolbar. Colored **[Image 1]** labels show a thumbnail on hover; Tether inserts a usable file path for the agent. Local temporary copies are removed when the terminal closes. **Clear previews** only hides the thumbnails; edit the prompt in the terminal to remove an inserted path.
+- **Claude Code / Codex**: Codex has its own movable sidebar view with terminal sessions, activity, attention badges, CPU / memory, last messages and navigation, using the same monitoring system as Claude. Configure Claude hooks and Codex completion notifications in **Settings → AI agents**. Codex `notify` reports completed turns; ongoing work is tracked from terminal activity and processes.
+- **Custom Boot**: right-click either agent icon, enter your local command and choose its shell. Tether passes the command and flags through unchanged, including account selectors implemented by your own functions or aliases. Choose the shell whose startup profile defines them (Windows PowerShell and PowerShell 7 use different profiles). The shell is remembered separately for each agent.
+- **Project launchers**: both normal launch and Custom Boot ask for a local project directory in the same card. Type a path (including `~`), use Tab / Shift+Tab completion or browse. Give it a name and choose **☆ Save** to pin a shortcut shared by Claude and Codex. Local terminal folders are remembered automatically, with up to 32 recent folders; right-click a shortcut to pin, unpin or forget it.
+- **Terminal colors**: local PTYs and SSH sessions share `xterm-256color` / true-color capability hints. Local shells do not inherit a GUI runner's `NO_COLOR`; ANSI, indexed and RGB colors use the existing terminal renderer and theme palette. SSH servers may restrict optional environment hints through `AcceptEnv`; their PTY still advertises 256 colors.
+- **Remote path links**: click a remote path to open SFTP beside that terminal, using the same companion pane as **Ctrl+Shift+F**; right-click also offers **Open in SFTP**, the editor and copy options. Repeated clicks navigate the existing pane. Paths inside prompts such as `prisma@host:~/project$` retain the prompt's account: `~` resolves to prisma's actual home on the server, even when SSH logged in as root and the shell used `su` / `sudo`. No `/home/<user>` assumption is made. Relative paths resolve against the source terminal's directory; files open their containing folder.
+- **Tab close targets**: hovering the close button or its surrounding area keeps the tab's current expansion, so resource details do not move the X while you aim for it.
+
+### Share machine setups and find SSH keys
+
+Open **Import / export setup…** from the app or Hosts menu. **Export setup** previews the machines and explains that anyone with the JSON file can import their names, IP addresses / hostnames, ports, usernames and colors. Keys, key paths, passwords and passphrases are excluded. Choose the **Tether setup** source card under **Import**, review the selected machines and import them; existing endpoints are skipped and imported machines need credentials before connecting.
+
+**Search this PC** in Import finds Bitvise profiles in common OS-provided folders. **Search this PC for SSH keys…** in the key manager or host editor searches `.ssh`, Bitvise locations, Documents, Desktop and Downloads, and displays each result's full path. Searches run in the background with a depth/time/file limit and skip symbolic links. You choose what to import; **Browse…** handles other locations. Export keys held in Bitvise's encrypted internal store as OpenSSH files from Bitvise before importing them.
+
 ## Install
 
 Download `Tether-Setup-<version>.exe` from [Releases](https://github.com/izLoki/Tether/releases) and run it. No admin rights needed. It adds Start menu and desktop shortcuts. Tether checks for new releases on startup and installs them in one click (*Settings → About → Updates*). Running a newer installer also upgrades in place.

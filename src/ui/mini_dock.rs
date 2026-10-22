@@ -6,10 +6,7 @@
 //! bar, or by dragging them onto the mini-dock bar. The bar itself can be dragged and
 //! snapped ("juntable") to any of the four window edges (Bottom, Top, Left, Right).
 
-use eframe::egui::{
-    self, Align2, Color32, CornerRadius, FontId, Id, LayerId, Mesh, Order, Painter, Pos2, Rect,
-    Sense, Stroke, StrokeKind, Vec2, pos2, vec2,
-};
+use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Id, LayerId, Mesh, Order, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 use egui_dock::{DockState, Node, Surface, SurfaceIndex};
 
 use super::tabs::Tab;
@@ -138,21 +135,9 @@ impl MiniDock {
         };
         let side = settings::snapshot().layout.mini_bar_side;
         let content = ctx.content_rect();
-        let dock_rect = self
-            .last_bar_rect
-            .map(|r| Rect::from_center_size(r.center(), vec2(36.0, 28.0)))
-            .unwrap_or_else(|| default_dock_slot(content, side));
+        let dock_rect = self.last_bar_rect.map(|r| Rect::from_center_size(r.center(), vec2(36.0, 28.0))).unwrap_or_else(|| default_dock_slot(content, side));
         let now = ctx.input(|i| i.time);
-        self.anims.push(GenieAnim {
-            window_rect: from_rect,
-            dock_rect,
-            side,
-            minimizing: true,
-            start_time: now,
-            hue,
-            icon,
-            title,
-        });
+        self.anims.push(GenieAnim { window_rect: from_rect, dock_rect, side, minimizing: true, start_time: now, hue, icon, title });
         self.minimized.push(MinimizedWindow { id, tabs, restore_rect: from_rect });
         ctx.request_repaint();
     }
@@ -195,16 +180,7 @@ impl MiniDock {
             .or_else(|| self.last_bar_rect.map(|r| Rect::from_center_size(r.center(), vec2(36.0, 28.0))))
             .unwrap_or_else(|| default_dock_slot(ctx.content_rect(), side));
         let now = ctx.input(|i| i.time);
-        self.anims.push(GenieAnim {
-            window_rect: target_rect,
-            dock_rect,
-            side,
-            minimizing: false,
-            start_time: now,
-            hue,
-            icon,
-            title,
-        });
+        self.anims.push(GenieAnim { window_rect: target_rect, dock_rect, side, minimizing: false, start_time: now, hue, icon, title });
         let surf = dock.add_window(win.tabs);
         if let Some(state) = dock.get_window_state_mut(surf) {
             state.set_position(target_rect.min).set_size(target_rect.size());
@@ -234,42 +210,39 @@ impl MiniDock {
             let header_h = 28.0;
             let ctrl_size = vec2(52.0, 22.0);
             let ctrl_pos = pos2(info.rect.right() - ctrl_size.x - 6.0, info.rect.top() + (header_h - ctrl_size.y) * 0.5);
-            egui::Area::new(area_id)
-                .order(Order::Foreground)
-                .fixed_pos(ctrl_pos)
-                .show(ctx, |ui| {
-                    let pill = Rect::from_min_size(ctrl_pos, ctrl_size);
-                    ui.painter().rect_filled(pill, CornerRadius::same(6), theme::surface_2().gamma_multiply(0.92));
-                    ui.painter().rect_stroke(pill, CornerRadius::same(6), Stroke::new(1.0, theme::border().gamma_multiply(0.5)), StrokeKind::Inside);
-                    let min_rect = Rect::from_min_size(pill.min + vec2(3.0, 2.0), vec2(21.0, 18.0));
-                    let close_rect = Rect::from_min_size(pill.min + vec2(27.0, 2.0), vec2(21.0, 18.0));
+            egui::Area::new(area_id).order(Order::Foreground).fixed_pos(ctrl_pos).show(ctx, |ui| {
+                let pill = Rect::from_min_size(ctrl_pos, ctrl_size);
+                ui.painter().rect_filled(pill, CornerRadius::same(6), theme::surface_2().gamma_multiply(0.92));
+                ui.painter().rect_stroke(pill, CornerRadius::same(6), Stroke::new(1.0, theme::border().gamma_multiply(0.5)), StrokeKind::Inside);
+                let min_rect = Rect::from_min_size(pill.min + vec2(3.0, 2.0), vec2(21.0, 18.0));
+                let close_rect = Rect::from_min_size(pill.min + vec2(27.0, 2.0), vec2(21.0, 18.0));
 
-                    let min_resp = ui.interact(min_rect, area_id.with("min"), Sense::click()).on_hover_text("Minimize to mini-bar");
-                    if min_resp.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        ui.painter().rect_filled(min_rect, CornerRadius::same(4), theme::accent_soft());
-                    }
-                    let min_col = if min_resp.hovered() { theme::accent() } else { theme::text_dim() };
-                    let mc = min_rect.center();
-                    ui.painter().line_segment([mc + vec2(-4.5, 1.0), mc + vec2(4.5, 1.0)], Stroke::new(1.6, min_col));
-                    if min_resp.clicked() {
-                        to_minimize.push((info.surface, info.rect));
-                    }
+                let min_resp = ui.interact(min_rect, area_id.with("min"), Sense::click()).on_hover_text("Minimize to mini-bar");
+                if min_resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    ui.painter().rect_filled(min_rect, CornerRadius::same(4), theme::accent_soft());
+                }
+                let min_col = if min_resp.hovered() { theme::accent() } else { theme::text_dim() };
+                let mc = min_rect.center();
+                ui.painter().line_segment([mc + vec2(-4.5, 1.0), mc + vec2(4.5, 1.0)], Stroke::new(1.6, min_col));
+                if min_resp.clicked() {
+                    to_minimize.push((info.surface, info.rect));
+                }
 
-                    let close_resp = ui.interact(close_rect, area_id.with("close"), Sense::click()).on_hover_text("Close window");
-                    if close_resp.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        ui.painter().rect_filled(close_rect, CornerRadius::same(4), theme::danger().gamma_multiply(0.24));
-                    }
-                    let close_col = if close_resp.hovered() { theme::danger() } else { theme::text_dim() };
-                    let cc = close_rect.center();
-                    let d = 3.5;
-                    ui.painter().line_segment([cc + vec2(-d, -d), cc + vec2(d, d)], Stroke::new(1.5, close_col));
-                    ui.painter().line_segment([cc + vec2(d, -d), cc + vec2(-d, d)], Stroke::new(1.5, close_col));
-                    if close_resp.clicked() {
-                        to_close.push(info.surface);
-                    }
-                });
+                let close_resp = ui.interact(close_rect, area_id.with("close"), Sense::click()).on_hover_text("Close window");
+                if close_resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    ui.painter().rect_filled(close_rect, CornerRadius::same(4), theme::danger().gamma_multiply(0.24));
+                }
+                let close_col = if close_resp.hovered() { theme::danger() } else { theme::text_dim() };
+                let cc = close_rect.center();
+                let d = 3.5;
+                ui.painter().line_segment([cc + vec2(-d, -d), cc + vec2(d, d)], Stroke::new(1.5, close_col));
+                ui.painter().line_segment([cc + vec2(d, -d), cc + vec2(-d, d)], Stroke::new(1.5, close_col));
+                if close_resp.clicked() {
+                    to_close.push(info.surface);
+                }
+            });
         }
         for (surf, rect) in to_minimize {
             self.minimize_surface(ctx, dock, surf, rect);
@@ -305,10 +278,7 @@ impl MiniDock {
 
         if down && !self.dragging_bar {
             // Check if pointer is dragging a floating window's title bar over the mini-dock bar.
-            let dragged_surf = floating
-                .iter()
-                .find(|f| drop_zone.contains(pos) && f.rect.expand(12.0).contains(pos))
-                .map(|f| f.surface);
+            let dragged_surf = floating.iter().find(|f| drop_zone.contains(pos) && f.rect.expand(12.0).contains(pos)).map(|f| f.surface);
             self.window_hover_bar = dragged_surf;
             if dragged_surf.is_some() {
                 let p = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("mini_dock_drop_glow")));
@@ -334,11 +304,7 @@ impl MiniDock {
             return;
         }
 
-        let bounds = if central_rect.width() > 100.0 && central_rect.height() > 100.0 {
-            central_rect
-        } else {
-            ctx.content_rect()
-        };
+        let bounds = if central_rect.width() > 100.0 && central_rect.height() > 100.0 { central_rect } else { ctx.content_rect() };
         let layout = &settings::snapshot().layout;
         let side = layout.mini_bar_side;
         let offset = layout.mini_bar_offset;
@@ -359,130 +325,120 @@ impl MiniDock {
         let mut toggle_float_req: Option<(SurfaceIndex, Rect)> = None;
 
         let area_id = Id::new("tether_mini_dock_bar");
-        egui::Area::new(area_id)
-            .order(Order::Foreground)
-            .fixed_pos(bar_rect.min)
-            .show(ctx, |ui| {
-                let p = ui.painter();
-                p.add(egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: theme::shadow() }.as_shape(bar_rect, CornerRadius::same(12)));
-                p.rect_filled(bar_rect, CornerRadius::same(12), theme::surface_2().gamma_multiply(0.96));
-                p.rect_stroke(bar_rect, CornerRadius::same(12), Stroke::new(1.0, theme::border()), StrokeKind::Inside);
+        egui::Area::new(area_id).order(Order::Foreground).fixed_pos(bar_rect.min).show(ctx, |ui| {
+            let p = ui.painter();
+            p.add(egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: theme::shadow() }.as_shape(bar_rect, CornerRadius::same(12)));
+            p.rect_filled(bar_rect, CornerRadius::same(12), theme::surface_2().gamma_multiply(0.96));
+            p.rect_stroke(bar_rect, CornerRadius::same(12), Stroke::new(1.0, theme::border()), StrokeKind::Inside);
 
-                // 1. Grip handle for dragging the mini-dock bar to any of the 4 sides.
-                let handle_rect = if horiz {
-                    Rect::from_min_size(bar_rect.min + vec2(4.0, 4.0), vec2(HANDLE_THICK, bar_rect.height() - 8.0))
-                } else {
-                    Rect::from_min_size(bar_rect.min + vec2(4.0, 4.0), vec2(bar_rect.width() - 8.0, HANDLE_THICK))
-                };
-                let handle_resp = ui
-                    .interact(handle_rect, area_id.with("grip"), Sense::click_and_drag())
-                    .on_hover_text("Drag to move & snap the mini-bar (Bottom, Top, Left, Right)");
-                if handle_resp.hovered() || handle_resp.dragged() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                }
-                paint_grip(p, handle_rect, horiz, handle_resp.hovered() || self.dragging_bar);
-                handle_resp.context_menu(|ui| {
-                    ui.label(egui::RichText::new("Mini-bar position").size(11.0).color(theme::text_faint()));
-                    for s in MiniBarSide::ALL {
-                        if ui.radio(side == s, s.label()).clicked() {
-                            let _ = settings::update(|st| st.layout.mini_bar_side = s);
-                            ui.close();
-                        }
+            // 1. Grip handle for dragging the mini-dock bar to any of the 4 sides.
+            let handle_rect = if horiz {
+                Rect::from_min_size(bar_rect.min + vec2(4.0, 4.0), vec2(HANDLE_THICK, bar_rect.height() - 8.0))
+            } else {
+                Rect::from_min_size(bar_rect.min + vec2(4.0, 4.0), vec2(bar_rect.width() - 8.0, HANDLE_THICK))
+            };
+            let handle_resp = ui
+                .interact(handle_rect, area_id.with("grip"), Sense::click_and_drag())
+                .on_hover_text("Drag to move & snap the mini-bar (Bottom, Top, Left, Right)");
+            if handle_resp.hovered() || handle_resp.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+            paint_grip(p, handle_rect, horiz, handle_resp.hovered() || self.dragging_bar);
+            handle_resp.context_menu(|ui| {
+                ui.label(egui::RichText::new("Mini-bar position").size(11.0).color(theme::text_faint()));
+                for s in MiniBarSide::ALL {
+                    if ui.radio(side == s, s.label()).clicked() {
+                        let _ = settings::update(|st| st.layout.mini_bar_side = s);
+                        ui.close();
                     }
-                });
-
-                if handle_resp.drag_started() {
-                    self.dragging_bar = true;
-                }
-                if self.dragging_bar {
-                    if let Some(ptr) = ui.ctx().pointer_latest_pos() {
-                        let (new_side, new_offset) = snap_bar_to_edge(bounds, ptr);
-                        paint_edge_snap_preview(ui.ctx(), bounds, new_side);
-                        settings::preview(|st| {
-                            st.layout.mini_bar_side = new_side;
-                            st.layout.mini_bar_offset = new_offset;
-                        });
-                    }
-                    if ui.input(|i| i.pointer.any_released()) {
-                        self.dragging_bar = false;
-                        let _ = settings::save();
-                    }
-                }
-
-                // 2. Render items (minimized windows first, then active floating windows).
-                let mut cursor = if horiz {
-                    pos2(handle_rect.right() + 4.0, bar_rect.top() + 5.0)
-                } else {
-                    pos2(bar_rect.left() + 5.0, handle_rect.bottom() + 4.0)
-                };
-                let step = if horiz { vec2(ITEM_W_HORIZ + 6.0, 0.0) } else { vec2(0.0, ITEM_H_VERT + 6.0) };
-                let item_size = if horiz { vec2(ITEM_W_HORIZ, ITEM_H_HORIZ) } else { vec2(ITEM_W_VERT, ITEM_H_VERT) };
-
-                for (idx, win) in self.minimized.iter_mut().enumerate() {
-                    let slot = Rect::from_min_size(cursor, item_size);
-                    cursor += step;
-                    self.slot_rects.push((win.id, slot));
-
-                    let (title, icon, hue, status) = match win.primary_tab_mut() {
-                        Some(tab) => (tab.display_title(), tab.icon().to_string(), tab.profile.hue, tab.status_color()),
-                        None => ("Window".into(), "🗗".into(), 200.0, theme::accent()),
-                    };
-                    let item_id = area_id.with(("min_item", win.id));
-                    let resp = ui.interact(slot, item_id, Sense::click_and_drag());
-                    let hover = ui.ctx().animate_bool_with_time(item_id.with("h"), resp.hovered(), theme::anim_time(0.12));
-
-                    paint_bar_chip(ui, slot, horiz, &icon, &title, hue, status, true, hover);
-
-                    // Close button on hover for minimized window.
-                    let close_center = if horiz {
-                        pos2(slot.right() - 12.0, slot.center().y)
-                    } else {
-                        pos2(slot.right() - 7.0, slot.top() + 7.0)
-                    };
-                    let mut closed_clicked = false;
-                    if hover > 0.1 {
-                        let cr = Rect::from_center_size(close_center, vec2(16.0, 16.0));
-                        let c_resp = ui.interact(cr, item_id.with("close"), Sense::click()).on_hover_text("Close minimized window");
-                        if c_resp.hovered() {
-                            ui.painter().rect_filled(cr, CornerRadius::same(4), theme::danger().gamma_multiply(0.28));
-                        }
-                        let col = if c_resp.hovered() { theme::danger() } else { theme::text_dim() };
-                        let d = 3.0;
-                        ui.painter().line_segment([close_center + vec2(-d, -d), close_center + vec2(d, d)], Stroke::new(1.3, col));
-                        ui.painter().line_segment([close_center + vec2(d, -d), close_center + vec2(-d, d)], Stroke::new(1.3, col));
-                        if c_resp.clicked() {
-                            closed_clicked = true;
-                            close_min_req = Some(idx);
-                        }
-                    }
-
-                    if !closed_clicked {
-                        if resp.clicked() {
-                            restore_req = Some((idx, None));
-                        } else if resp.dragged()
-                            && let Some(ptr) = ui.ctx().pointer_latest_pos()
-                            && !bar_rect.expand(18.0).contains(ptr)
-                        {
-                            restore_req = Some((idx, Some(ptr - vec2(120.0, 16.0))));
-                        }
-                    }
-                    resp.on_hover_text(format!("{title} (minimized — click or drag out to restore)"));
-                }
-
-                for info in floating {
-                    let slot = Rect::from_min_size(cursor, item_size);
-                    cursor += step;
-                    let item_id = area_id.with(("float_item", info.surface));
-                    let resp = ui.interact(slot, item_id, Sense::click());
-                    let hover = ui.ctx().animate_bool_with_time(item_id.with("h"), resp.hovered(), theme::anim_time(0.12));
-
-                    paint_bar_chip(ui, slot, horiz, &info.icon, &info.title, info.hue, info.status, false, hover);
-                    if resp.clicked() {
-                        toggle_float_req = Some((info.surface, info.rect));
-                    }
-                    resp.on_hover_text(format!("{} (open — click to minimize)", info.title));
                 }
             });
+
+            if handle_resp.drag_started() {
+                self.dragging_bar = true;
+            }
+            if self.dragging_bar {
+                if let Some(ptr) = ui.ctx().pointer_latest_pos() {
+                    let (new_side, new_offset) = snap_bar_to_edge(bounds, ptr);
+                    paint_edge_snap_preview(ui.ctx(), bounds, new_side);
+                    settings::preview(|st| {
+                        st.layout.mini_bar_side = new_side;
+                        st.layout.mini_bar_offset = new_offset;
+                    });
+                }
+                if ui.input(|i| i.pointer.any_released()) {
+                    self.dragging_bar = false;
+                    let _ = settings::save();
+                }
+            }
+
+            // 2. Render items (minimized windows first, then active floating windows).
+            let mut cursor =
+                if horiz { pos2(handle_rect.right() + 4.0, bar_rect.top() + 5.0) } else { pos2(bar_rect.left() + 5.0, handle_rect.bottom() + 4.0) };
+            let step = if horiz { vec2(ITEM_W_HORIZ + 6.0, 0.0) } else { vec2(0.0, ITEM_H_VERT + 6.0) };
+            let item_size = if horiz { vec2(ITEM_W_HORIZ, ITEM_H_HORIZ) } else { vec2(ITEM_W_VERT, ITEM_H_VERT) };
+
+            for (idx, win) in self.minimized.iter_mut().enumerate() {
+                let slot = Rect::from_min_size(cursor, item_size);
+                cursor += step;
+                self.slot_rects.push((win.id, slot));
+
+                let (title, icon, hue, status) = match win.primary_tab_mut() {
+                    Some(tab) => (tab.display_title(), tab.icon().to_string(), tab.profile.hue, tab.status_color()),
+                    None => ("Window".into(), "🗗".into(), 200.0, theme::accent()),
+                };
+                let item_id = area_id.with(("min_item", win.id));
+                let resp = ui.interact(slot, item_id, Sense::click_and_drag());
+                let hover = ui.ctx().animate_bool_with_time(item_id.with("h"), resp.hovered(), theme::anim_time(0.12));
+
+                paint_bar_chip(ui, slot, horiz, &icon, &title, hue, status, true, hover);
+
+                // Close button on hover for minimized window.
+                let close_center = if horiz { pos2(slot.right() - 12.0, slot.center().y) } else { pos2(slot.right() - 7.0, slot.top() + 7.0) };
+                let mut closed_clicked = false;
+                if hover > 0.1 {
+                    let cr = Rect::from_center_size(close_center, vec2(16.0, 16.0));
+                    let c_resp = ui.interact(cr, item_id.with("close"), Sense::click()).on_hover_text("Close minimized window");
+                    if c_resp.hovered() {
+                        ui.painter().rect_filled(cr, CornerRadius::same(4), theme::danger().gamma_multiply(0.28));
+                    }
+                    let col = if c_resp.hovered() { theme::danger() } else { theme::text_dim() };
+                    let d = 3.0;
+                    ui.painter().line_segment([close_center + vec2(-d, -d), close_center + vec2(d, d)], Stroke::new(1.3, col));
+                    ui.painter().line_segment([close_center + vec2(d, -d), close_center + vec2(-d, d)], Stroke::new(1.3, col));
+                    if c_resp.clicked() {
+                        closed_clicked = true;
+                        close_min_req = Some(idx);
+                    }
+                }
+
+                if !closed_clicked {
+                    if resp.clicked() {
+                        restore_req = Some((idx, None));
+                    } else if resp.dragged()
+                        && let Some(ptr) = ui.ctx().pointer_latest_pos()
+                        && !bar_rect.expand(18.0).contains(ptr)
+                    {
+                        restore_req = Some((idx, Some(ptr - vec2(120.0, 16.0))));
+                    }
+                }
+                resp.on_hover_text(format!("{title} (minimized — click or drag out to restore)"));
+            }
+
+            for info in floating {
+                let slot = Rect::from_min_size(cursor, item_size);
+                cursor += step;
+                let item_id = area_id.with(("float_item", info.surface));
+                let resp = ui.interact(slot, item_id, Sense::click());
+                let hover = ui.ctx().animate_bool_with_time(item_id.with("h"), resp.hovered(), theme::anim_time(0.12));
+
+                paint_bar_chip(ui, slot, horiz, &info.icon, &info.title, info.hue, info.status, false, hover);
+                if resp.clicked() {
+                    toggle_float_req = Some((info.surface, info.rect));
+                }
+                resp.on_hover_text(format!("{} (open — click to minimize)", info.title));
+            }
+        });
 
         if let Some(idx) = close_min_req {
             let mut win = self.minimized.remove(idx);
@@ -622,10 +578,7 @@ fn paint_genie_funnel(painter: &Painter, anim: &GenieAnim, raw_t: f32) {
 }
 
 fn collect_floating_surfaces(ctx: &egui::Context, dock: &mut DockState<Tab>) -> Vec<FloatingSurfaceInfo> {
-    let indices: Vec<SurfaceIndex> = dock
-        .iter_surfaces_indexed()
-        .filter_map(|(i, s)| matches!(s, Surface::Window(..)).then_some(i))
-        .collect();
+    let indices: Vec<SurfaceIndex> = dock.iter_surfaces_indexed().filter_map(|(i, s)| matches!(s, Surface::Window(..)).then_some(i)).collect();
     let mut out = Vec::new();
     for i in indices {
         let area_id = Id::new(format!("window {i:?}"));
@@ -739,17 +692,7 @@ fn paint_grip(p: &Painter, rect: Rect, horiz: bool, hot: bool) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn paint_bar_chip(
-    ui: &egui::Ui,
-    slot: Rect,
-    horiz: bool,
-    icon: &str,
-    title: &str,
-    hue: f32,
-    status: Color32,
-    minimized: bool,
-    hover: f32,
-) {
+fn paint_bar_chip(ui: &egui::Ui, slot: Rect, horiz: bool, icon: &str, title: &str, hue: f32, status: Color32, minimized: bool, hover: f32) {
     let p = ui.painter();
     let tint = theme::hue_color(hue);
     let bg = if minimized {
@@ -771,8 +714,7 @@ fn paint_bar_chip(
         let short: String = title.chars().take(16).collect();
         let galley = p.layout_no_wrap(short, FontId::proportional(12.0), theme::text());
         let text_pos = pos2(tile.right() + 7.0, slot.center().y - galley.size().y * 0.5);
-        p.with_clip_rect(Rect::from_min_size(pos2(tile.right() + 4.0, slot.top()), vec2(text_max_w, slot.height())))
-            .galley(text_pos, galley, theme::text());
+        p.with_clip_rect(Rect::from_min_size(pos2(tile.right() + 4.0, slot.top()), vec2(text_max_w, slot.height()))).galley(text_pos, galley, theme::text());
     } else {
         let tile = Rect::from_center_size(slot.center(), vec2(28.0, 28.0));
         p.rect_filled(tile, CornerRadius::same(7), tint.gamma_multiply(0.24));

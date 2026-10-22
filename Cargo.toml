@@ -15,7 +15,7 @@ publish = false
 anyhow = "1.0.104"
 directories = "6.0.0"
 eframe = "0.36"
-egui_extras = { version = "0.36", default-features = false, features = ["syntect"] }
+egui_extras = { version = "0.36", default-features = false, features = ["syntect", "svg"] }
 egui_dock = { version = "0.21.1", features = ["serde"] }
 futures = "0.3"
 keyring = { version = "3", features = ["windows-native"] }
@@ -31,6 +31,9 @@ tokio = { version = "1.53.3", features = ["full"] }
 ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
 uuid = { version = "1.28.0", features = ["v4", "serde"] }
 vt100 = "0.16.2"
+vte = "0.15"
+arboard = "3.7"
+tempfile = "3"
 zeroize = "1"
 portable-pty = "0.9"
 serde_norway = "0.9.42"
@@ -41,7 +44,6 @@ notify-rust = "4"
 toml_edit = "0.25"
 
 [dev-dependencies]
-tempfile = "3"
 egui_kittest = { version = "0.36", features = ["eframe", "wgpu", "snapshot"] }
 
 [profile.release]

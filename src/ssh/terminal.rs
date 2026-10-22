@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use super::connection::{Connection, Stage};
 use crate::repaint::RepaintThrottle;
 
-pub const TERM_NAME: &str = "xterm-256color";
+pub const TERM_NAME: &str = crate::terminal_capabilities::TERM;
 /// Fallback scrollback; the live value comes from `settings.terminal.scrollback`.
 pub const SCROLLBACK_LINES: usize = 10_000;
 
@@ -36,6 +36,7 @@ impl LinkState {
 /// Captures OSC title changes and bells from the remote.
 #[derive(Default)]
 pub struct Events {
+    pub clear_detector: ClearDetector,
     pub title: Option<String>,
     pub bell_count: u64,
     /// Working directory reported by the shell via OSC 7 (`file://host/path`), if it does.
@@ -145,6 +146,55 @@ pub fn new_parser(rows: u16, cols: u16, scrollback: usize) -> vt100::Parser<Even
 /// in pieces of at most half the scrollback, with a block line-number sync after each,
 /// so evicted rows are still counted (see `shell_integration::blocks`).
 pub fn feed(parser: &mut vt100::Parser<Events>, mut bytes: &[u8]) {
+    // Observe actual erase sequences, including sequences split across PTY reads.
+    // Cursor-position heuristics alone miss ConPTY's final (and often only) repaint.
+    let mut detector = std::mem::take(&mut parser.callbacks_mut().clear_detector);
+    let mut start = 0;
+    for (i, byte) in bytes.iter().enumerate() {
+        let mut request = ClearRequest::default();
+        detector.parser.advance(&mut request, &[*byte]);
+        if let Some(mode) = request.0 {
+            feed_inner(parser, &bytes[start..=i]);
+            let screen = parser.screen();
+            if !screen.alternate_screen() && (mode != 0 || screen.cursor_position() == (0, 0)) {
+                let mut shell = std::mem::take(&mut parser.callbacks_mut().shell);
+                shell.erase_display(parser.screen_mut(), mode == 3 || mode == 4);
+                parser.callbacks_mut().shell = shell;
+            }
+            start = i + 1;
+        }
+    }
+    bytes = &bytes[start..];
+    feed_inner(parser, bytes);
+    parser.callbacks_mut().clear_detector = detector;
+}
+
+#[derive(Default)]
+pub struct ClearDetector {
+    parser: vte::Parser,
+}
+
+#[derive(Default)]
+struct ClearRequest(Option<u16>);
+
+impl vte::Perform for ClearRequest {
+    fn csi_dispatch(&mut self, params: &vte::Params, intermediates: &[u8], ignore: bool, action: char) {
+        if action == 'J' && intermediates.is_empty() && !ignore {
+            let mode = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(0);
+            if matches!(mode, 0 | 2 | 3) {
+                self.0 = Some(mode);
+            }
+        }
+    }
+
+    fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
+        if byte == b'c' && intermediates.is_empty() && !ignore {
+            self.0 = Some(4); // RIS resets the screen and history.
+        }
+    }
+}
+
+fn feed_inner(parser: &mut vt100::Parser<Events>, mut bytes: &[u8]) {
     let Some(step) = parser.callbacks().shell.sync_every() else {
         parser.process(bytes);
         return;
@@ -286,6 +336,13 @@ pub async fn run_shell(
     repaint();
     let channel = conn.handle.channel_open_session().await?;
     channel.request_pty(false, TERM_NAME, cols.into(), rows.into(), 0, 0, &[]).await?;
+    // Optional SSH env requests: servers may restrict AcceptEnv; PTY TERM still
+    // advertises 256 colors when those extra hints are rejected.
+    for &(key, value) in crate::terminal_capabilities::ENV {
+        if key != "TERM" {
+            let _ = channel.set_env(false, key, value).await;
+        }
+    }
     // Most servers accept LC_* (Debian/Ubuntu `AcceptEnv LANG LC_*`); harmless if refused.
     let _ = channel.set_env(false, "LC_TETHER_ID", term.tag.clone()).await;
     channel.request_shell(false).await?;
@@ -349,6 +406,32 @@ pub async fn run_shell(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn erase_clears_lazy_command_decorations_with_no_further_output() {
+        for erase in [b"\x1b[2J\x1b[H".as_slice(), b"\x1b[H\x1b[J", b"\x1bc"] {
+            let mut parser = new_parser(24, 80, 100);
+            parser.callbacks_mut().shell.set_lazy_marks(true);
+            feed(&mut parser, b"\x1b]133;A\x07PS> \x1b]133;B\x07bad-command\r\n\x1b]6973;cmd;bad-command\x07\x1b]133;C\x07not found\r\n\x1b]133;D;1\x07\x1b]133;A\x07PS> \x1b]133;B\x07");
+            assert!(!parser.callbacks().shell.blocks().is_empty());
+            // Every possible boundary: ConPTY may split even ESC from its '['.
+            for byte in erase {
+                feed(&mut parser, &[*byte]);
+            }
+            assert!(parser.callbacks().shell.blocks().is_empty(), "erase {erase:?}");
+            feed(&mut parser, b"\x1b]133;A\x07PS> \x1b]133;B\x07");
+            assert_eq!(parser.callbacks().shell.blocks().len(), 1);
+        }
+    }
+
+    #[test]
+    fn partial_erase_and_quoted_escape_text_preserve_marks() {
+        let mut parser = new_parser(24, 80, 100);
+        feed(&mut parser, b"\x1b]133;A\x07$ \x1b]133;B\x07echo ok\r\n\x1b]133;C\x07ok\r\n\x1b]133;D;0\x07");
+        let n = parser.callbacks().shell.blocks().len();
+        feed(&mut parser, b"\x1b[J\x1b]2;literal [2J in title\x07");
+        assert_eq!(parser.callbacks().shell.blocks().len(), n);
+    }
 
     fn parser() -> vt100::Parser<Events> {
         vt100::Parser::new_with_callbacks(24, 80, 0, Events::default())

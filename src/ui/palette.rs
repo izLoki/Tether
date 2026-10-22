@@ -109,13 +109,16 @@ impl Palette {
         let screen = ctx.content_rect();
         let width = WIDTH.min(screen.width() - 32.0);
         let id = Id::new("tether_palette");
-        let area = egui::Modal::default_area(id).anchor(Align2::CENTER_TOP, Vec2::new(0.0, (screen.height() * 0.12).clamp(24.0, 120.0) - 8.0 * (1.0 - eased))).fade_in(false);
+        let area = egui::Modal::default_area(id)
+            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, (screen.height() * 0.12).clamp(24.0, 120.0) - 8.0 * (1.0 - eased)))
+            .fade_in(false);
         let dim = if theme::palette().dark { 120 } else { 60 };
         let mut run = None;
-        let modal = egui::Modal::new(id).area(area).backdrop_color(Color32::from_black_alpha(dim).gamma_multiply(eased)).frame(egui::Frame::NONE).show(ctx, |ui| {
-            ui.multiply_opacity(eased);
-            run = self.window(ui, width);
-        });
+        let modal =
+            egui::Modal::new(id).area(area).backdrop_color(Color32::from_black_alpha(dim).gamma_multiply(eased)).frame(egui::Frame::NONE).show(ctx, |ui| {
+                ui.multiply_opacity(eased);
+                run = self.window(ui, width);
+            });
         if let Some(cmd) = run {
             return PaletteOutcome::Run(cmd);
         }
@@ -145,7 +148,12 @@ impl Palette {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::hover());
         let p = ui.painter();
         p.rect_filled(rect, CornerRadius::same(8), theme::surface_2());
-        super::settings_widgets::paint_icon(p, Rect::from_center_size(Pos2::new(rect.left() + 20.0, rect.center().y), Vec2::splat(15.0)), super::settings_widgets::Icon::Search, theme::text_faint());
+        super::settings_widgets::paint_icon(
+            p,
+            Rect::from_center_size(Pos2::new(rect.left() + 20.0, rect.center().y), Vec2::splat(15.0)),
+            super::settings_widgets::Icon::Search,
+            theme::text_faint(),
+        );
         let edit_rect = Rect::from_min_max(Pos2::new(rect.left() + 36.0, rect.top() + 4.0), Pos2::new(rect.right() - 8.0, rect.bottom() - 4.0));
         let mut q = self.query.clone();
         let edit = ui.put(
@@ -288,7 +296,13 @@ fn footer(ui: &mut egui::Ui) {
         let label = p.text(Pos2::new(chip.right() + 5.0, y), Align2::LEFT_CENTER, what, FontId::proportional(11.0), theme::text_faint());
         x = label.right() + 14.0;
     }
-    p.text(Pos2::new(rect.right() - 8.0, y), Align2::RIGHT_CENTER, "type words in any order", FontId::proportional(11.0), theme::text_faint().gamma_multiply(0.8));
+    p.text(
+        Pos2::new(rect.right() - 8.0, y),
+        Align2::RIGHT_CENTER,
+        "type words in any order",
+        FontId::proportional(11.0),
+        theme::text_faint().gamma_multiply(0.8),
+    );
 }
 
 #[cfg(test)]

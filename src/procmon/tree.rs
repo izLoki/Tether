@@ -123,19 +123,13 @@ impl Table {
             Some(ap) => {
                 let desc_pids = self.descendants(ap.pid);
                 let has_active_child = desc_pids.iter().copied().filter(|&p| p != ap.pid).filter_map(|p| self.row(p)).any(|r| {
-                    !is_passive_helper(&r.name)
-                        && (r.agent.is_some()
-                            || is_tool_or_shell_proc(&r.name)
-                            || r.start > ap.start.saturating_add(2)
-                            || r.cpu >= 0.8)
+                    !is_passive_helper(&r.name) && (r.agent.is_some() || is_tool_or_shell_proc(&r.name) || r.start > ap.start.saturating_add(2) || r.cpu >= 0.8)
                 });
                 has_active_child || ap.cpu >= 2.0
             }
             None => false,
         };
-        let cwd = agent_row
-            .and_then(|r| r.cwd.clone())
-            .or_else(|| rows.first().and_then(|r| r.cwd.clone()));
+        let cwd = agent_row.and_then(|r| r.cwd.clone()).or_else(|| rows.first().and_then(|r| r.cwd.clone()));
         Some(Usage {
             cpu: rows.iter().map(|r| r.cpu).sum(),
             mem: rows.iter().map(|r| r.mem).sum(),

@@ -109,37 +109,26 @@ impl SftpView {
                     if conflicts.len() == 1 {
                         ui.heading(format!("Replace “{}”?", conflicts[0]));
                         ui.label(
-                            egui::RichText::new(format!(
-                                "“{}” already exists in the {target_side} folder. Are you sure you want to replace it?",
-                                conflicts[0]
-                            ))
-                            .color(theme::text_dim()),
+                            egui::RichText::new(format!("“{}” already exists in the {target_side} folder. Are you sure you want to replace it?", conflicts[0]))
+                                .color(theme::text_dim()),
                         );
                     } else {
                         ui.heading(format!("Replace {} existing files?", conflicts.len()));
                         let summary = if items.len() > conflicts.len() {
-                            format!(
-                                "{} of the {} selected items already exist in the {target_side} folder and will be replaced:",
-                                conflicts.len(),
-                                items.len()
-                            )
+                            format!("{} of the {} selected items already exist in the {target_side} folder and will be replaced:", conflicts.len(), items.len())
                         } else {
                             format!("The following {} items already exist in the {target_side} folder and will be replaced:", conflicts.len())
                         };
                         ui.label(egui::RichText::new(summary).color(theme::text_dim()));
                         ui.add_space(6.0);
-                        egui::Frame::new()
-                            .fill(theme::surface_2())
-                            .corner_radius(egui::CornerRadius::same(6))
-                            .inner_margin(8.0)
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                egui::ScrollArea::vertical().max_height(160.0).auto_shrink([false, true]).show(ui, |ui| {
-                                    for name in conflicts.iter() {
-                                        ui.label(egui::RichText::new(format!("• {name}")).monospace().size(12.0).color(theme::text()));
-                                    }
-                                });
+                        egui::Frame::new().fill(theme::surface_2()).corner_radius(egui::CornerRadius::same(6)).inner_margin(8.0).show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            egui::ScrollArea::vertical().max_height(160.0).auto_shrink([false, true]).show(ui, |ui| {
+                                for name in conflicts.iter() {
+                                    ui.label(egui::RichText::new(format!("• {name}")).monospace().size(12.0).color(theme::text()));
+                                }
                             });
+                        });
                     }
                 }
                 Dialog::OpenRefused { name, reason } => {

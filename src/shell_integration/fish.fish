@@ -82,6 +82,7 @@ if set -q TETHER_SESSION; and not set -q __tether_si; and status is-interactive
             printf '%s> ' $PWD
         end
     end
+    bind \e\r 'commandline -i \n'
     function fish_prompt
         set -l code $status
         printf '\e]133;A\a'

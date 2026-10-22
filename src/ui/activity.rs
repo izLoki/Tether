@@ -31,13 +31,19 @@ pub struct ViewDrag(pub View);
 pub enum ViewEvent {
     Click(View),
     /// Into `to` before the view now at `index` (`None` = the end).
-    Move { view: View, to: Container, index: Option<usize> },
+    Move {
+        view: View,
+        to: Container,
+        index: Option<usize>,
+    },
     Hide(View),
     Reveal(View),
     Toggle(Container),
     SetBar(Container, BarOrientation),
     Reset,
     OpenSettings,
+    LaunchAgent(crate::agents::AgentKind),
+    CustomBoot(crate::agents::AgentKind),
 }
 
 /// A small count on an icon; `tone` (the colour of an agent status) makes it stand out.
@@ -77,17 +83,17 @@ pub fn view_icon(v: View) -> Icon {
         View::Hosts => Icon::Server,
         View::Sessions => Icon::Rows,
         View::Workspaces => Icon::Layout,
-        View::Agents => Icon::Sparkle,
+        View::Agents | View::Codex => Icon::Sparkle,
     }
 }
 
 /// Paints `v`'s icon in `rect` with `col`. Agents uses the agent mark of the tab rows
 /// (in its own colour, faded the way `col` is relative to full text).
 pub fn paint_view_icon(p: &egui::Painter, rect: Rect, v: View, col: Color32) {
-    if v == View::Agents {
+    if let Some(kind) = v.agent() {
         let alpha = (f32::from(col.a()) / 255.0).clamp(0.35, 1.0);
         let strength = if col == theme::text() { 1.0 } else { 0.7 };
-        super::agent_icons::paint(p, rect.shrink(rect.width() * 0.05), crate::agents::AgentKind::Claude, alpha * strength);
+        super::agent_icons::paint(p, rect.shrink(rect.width() * 0.05), kind, alpha * strength);
     } else {
         paint_icon(p, rect, view_icon(v), col);
     }
@@ -100,6 +106,7 @@ pub fn view_action(v: View) -> Action {
         View::Hosts => Action::SearchHosts,
         View::Workspaces => Action::FocusWorkspacesView,
         View::Agents => Action::ToggleAgents,
+        View::Codex => Action::ToggleCodex,
     }
 }
 
@@ -201,7 +208,11 @@ impl Strip<'_> {
         }
         resp.context_menu(|ui| self.strip_menu(ui, Some(v), events));
         if !dragging {
-            let tip = if selected { format!("{} (click to fold)", keybindings::hint(v.title(), view_action(v))) } else { keybindings::hint(v.title(), view_action(v)) };
+            let tip = if selected {
+                format!("{} (click to fold)", keybindings::hint(v.title(), view_action(v)))
+            } else {
+                keybindings::hint(v.title(), view_action(v))
+            };
             resp.on_hover_text(tip);
         }
     }
@@ -210,6 +221,10 @@ impl Strip<'_> {
     fn strip_menu(&self, ui: &mut Ui, view: Option<View>, events: &mut Vec<ViewEvent>) {
         ui.set_min_width(200.0);
         if let Some(v) = view {
+            if let Some(kind) = v.agent() {
+                agent_boot_menu(ui, kind, events);
+                ui.separator();
+            }
             ui.menu_button("Move to", |ui| {
                 for c in Container::ALL {
                     if ui.add_enabled(c != self.container, egui::Button::new(c.title())).clicked() {
@@ -249,6 +264,17 @@ impl Strip<'_> {
     }
 }
 
+fn agent_boot_menu(ui: &mut Ui, kind: crate::agents::AgentKind, events: &mut Vec<ViewEvent>) {
+    if ui.button(format!("Launch {}", kind.name())).clicked() {
+        events.push(ViewEvent::LaunchAgent(kind));
+        ui.close();
+    }
+    if ui.button("Custom Boot…").clicked() {
+        events.push(ViewEvent::CustomBoot(kind));
+        ui.close();
+    }
+}
+
 /// A gear at the bottom of the primary strip.
 pub fn settings_button(ui: &mut Ui, strip: Rect, events: &mut Vec<ViewEvent>) {
     let r = Rect::from_min_size(Pos2::new(strip.center().x - ITEM / 2.0, strip.bottom() - 8.0 - ITEM), Vec2::splat(ITEM));
@@ -282,7 +308,10 @@ fn badge_width(p: &egui::Painter, b: Badge) -> f32 {
 }
 
 fn paint_badge(p: &egui::Painter, c: Pos2, b: Badge, alpha: f32, inline: bool) {
-    let (fill, fg) = match b.tone { Some(c) => (c, theme::bg()), None => (theme::surface_3(), theme::text_dim()) };
+    let (fill, fg) = match b.tone {
+        Some(c) => (c, theme::bg()),
+        None => (theme::surface_3(), theme::text_dim()),
+    };
     let galley = p.layout_no_wrap(badge_text(b), FontId::proportional(9.0), fg.gamma_multiply(alpha));
     let pill = Rect::from_center_size(c, Vec2::new(badge_width(p, b), 15.0));
     // A ring in the strip's colour keeps it apart from the glyph under it.
@@ -344,9 +373,21 @@ impl DropTargets {
         for (c, zone, preview) in &edges {
             let hot = matches!(spot, Some(Spot::Edge(t, _)) if t == *c);
             let a = ctx.animate_bool_with_time(Id::new(("view_drop_edge", *c)), hot, theme::anim_time(0.14));
-            p.rect(*zone, CornerRadius::same(8), theme::accent().gamma_multiply(0.05), Stroke::new(1.0, theme::accent().gamma_multiply(0.22)), egui::StrokeKind::Inside);
+            p.rect(
+                *zone,
+                CornerRadius::same(8),
+                theme::accent().gamma_multiply(0.05),
+                Stroke::new(1.0, theme::accent().gamma_multiply(0.22)),
+                egui::StrokeKind::Inside,
+            );
             if a > 0.0 {
-                p.rect(*preview, CornerRadius::same(8), theme::accent().gamma_multiply(0.16 * a), Stroke::new(1.5, theme::accent().gamma_multiply(0.85 * a)), egui::StrokeKind::Inside);
+                p.rect(
+                    *preview,
+                    CornerRadius::same(8),
+                    theme::accent().gamma_multiply(0.16 * a),
+                    Stroke::new(1.5, theme::accent().gamma_multiply(0.85 * a)),
+                    egui::StrokeKind::Inside,
+                );
                 label(&p, preview.center(), c.title(), a);
             }
         }
@@ -354,7 +395,13 @@ impl DropTargets {
             Some(Spot::Strip { container, index }) => self.paint_insertion(&p, container, index, view),
             Some(Spot::Body(c)) => {
                 if let Some((_, r)) = self.bodies.iter().find(|(b, _)| *b == c) {
-                    p.rect(*r, CornerRadius::same(8), theme::accent().gamma_multiply(0.10), Stroke::new(1.5, theme::accent().gamma_multiply(0.7)), egui::StrokeKind::Inside);
+                    p.rect(
+                        *r,
+                        CornerRadius::same(8),
+                        theme::accent().gamma_multiply(0.10),
+                        Stroke::new(1.5, theme::accent().gamma_multiply(0.7)),
+                        egui::StrokeKind::Inside,
+                    );
                     label(&p, r.center(), &format!("Move to {}", c.title().to_lowercase()), 1.0);
                 }
             }
@@ -437,7 +484,13 @@ impl DropTargets {
 fn label(p: &egui::Painter, c: Pos2, text: &str, alpha: f32) {
     let galley = p.layout_no_wrap(text.to_string(), FontId::proportional(12.0), theme::text().gamma_multiply(alpha));
     let pill = Rect::from_center_size(c, galley.size() + Vec2::new(20.0, 10.0));
-    p.rect(pill, CornerRadius::same(8), theme::surface_2().gamma_multiply(0.95 * alpha), Stroke::new(1.0, theme::border().gamma_multiply(alpha)), egui::StrokeKind::Inside);
+    p.rect(
+        pill,
+        CornerRadius::same(8),
+        theme::surface_2().gamma_multiply(0.95 * alpha),
+        Stroke::new(1.0, theme::border().gamma_multiply(alpha)),
+        egui::StrokeKind::Inside,
+    );
     p.galley(pill.center() - galley.size() / 2.0, galley, theme::text());
 }
 

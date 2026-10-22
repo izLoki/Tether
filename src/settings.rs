@@ -217,6 +217,8 @@ pub struct AgentSettings {
     pub notify_on_done: bool,
     /// Sampling period of the resource monitor (slower while tether is in the background).
     pub monitor_interval_ms: u64,
+    /// Shell chosen in Custom Boot, by agent id. Separate from the normal terminal default.
+    pub launch_shells: BTreeMap<String, String>,
 }
 
 impl AgentSettings {
@@ -230,7 +232,15 @@ impl AgentSettings {
 
 impl Default for AgentSettings {
     fn default() -> Self {
-        Self { show_usage: true, badges: true, desktop_notifications: true, flash_taskbar: true, notify_on_done: true, monitor_interval_ms: 1500 }
+        Self {
+            show_usage: true,
+            badges: true,
+            desktop_notifications: true,
+            flash_taskbar: true,
+            notify_on_done: true,
+            monitor_interval_ms: 1500,
+            launch_shells: BTreeMap::new(),
+        }
     }
 }
 
@@ -257,6 +267,7 @@ impl Default for EditorSettings {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Settings {
+    pub projects: crate::local_projects::Projects,
     pub appearance: Appearance,
     pub terminal: TerminalSettings,
     pub sftp: SftpSettings,

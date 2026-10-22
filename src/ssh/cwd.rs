@@ -112,9 +112,73 @@ pub async fn terminal_cwd(conn: &Connection, probe: Probe<'_>) -> Result<String>
     pick(&text, &probe).ok_or_else(|| anyhow::anyhow!("Couldn't tell which shell belongs to this terminal. Tip: let the shell report its folder (OSC 7)"))
 }
 
+/// Usernames accepted in a prompt's named-home reference. No shell syntax is allowed.
+pub fn valid_home_user(user: &str) -> bool {
+    !user.is_empty() && user.len() <= 256 && !user.starts_with('-') && user.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'.'))
+}
+
+pub fn user_home_command(user: &str) -> Result<String> {
+    if !valid_home_user(user) {
+        bail!("Invalid username in remote home path");
+    }
+    // NSS-aware on Linux; /etc/passwd also covers systems without getent. The
+    // validated username cannot escape the quotes or introduce shell expansion.
+    Ok(format!("sh -c 'getent passwd \"{user}\" 2>/dev/null || grep -F \"{user}:\" /etc/passwd'"))
+}
+
+fn parse_user_home(output: &str, user: &str) -> Result<String> {
+    for entry in output.lines() {
+        let mut fields = entry.split(':');
+        if fields.next() != Some(user) {
+            continue;
+        }
+        if let Some(home) = fields.nth(4)
+            && home.starts_with('/')
+            && home.len() <= MAX_PATH
+            && !home.chars().any(char::is_control)
+        {
+            return Ok(home.into());
+        }
+    }
+    bail!("Could not resolve the remote home directory for {user}")
+}
+
+pub async fn user_home(conn: &Connection, user: &str) -> Result<String> {
+    let command = user_home_command(user)?;
+    let (out, _) = tokio::time::timeout(EXEC_TIMEOUT, exec(conn, command, MAX_OUTPUT)).await.context("timed out resolving remote user's home")??;
+    parse_user_home(std::str::from_utf8(&out).context("invalid remote home reply")?, user)
+}
+
+/// Resolve remote paths for both SFTP navigation and the editor. In particular,
+/// ~prisma uses prisma's actual home, not the SSH transport's authenticated home.
+pub async fn resolve_path(conn: &Connection, sftp: &super::sftp::Sftp, path: &str, cwd: &str) -> Result<String> {
+    if path.starts_with('/') {
+        return Ok(path.into());
+    }
+    if let Some(rest) = path.strip_prefix('~') {
+        let (user, tail) = rest.split_once('/').unwrap_or((rest, ""));
+        let home = if user.is_empty() { sftp.canonicalize(".").await? } else { user_home(conn, user).await? };
+        return Ok(if tail.is_empty() { home } else { super::sftp::join(&home, tail) });
+    }
+    Ok(super::sftp::join(cwd, path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_home_uses_the_prompt_account_and_its_actual_server_home() {
+        let passwd = "root:x:0:0:root:/root:/bin/bash\nprisma:x:1001:1001::/srv/custom home/prisma:/bin/bash\n";
+        assert_eq!(parse_user_home(passwd, "prisma").unwrap(), "/srv/custom home/prisma");
+        assert_eq!(parse_user_home(passwd, "root").unwrap(), "/root");
+        assert!(parse_user_home(passwd, "missing").is_err());
+        assert!(parse_user_home("prisma:x:1:1::relative:/bin/sh", "prisma").is_err());
+        assert!(user_home_command("prisma").unwrap().contains("getent passwd \"prisma\""));
+        for bad in ["", "-root", "prisma;id", "$(id)", "a\"b", "a'b", "a/b", "a\nb"] {
+            assert!(user_home_command(bad).is_err(), "{bad:?}");
+        }
+    }
 
     const PROBE: Probe = Probe { tag: "ab12", age_secs: 30.0, rows: 40, cols: 120 };
 

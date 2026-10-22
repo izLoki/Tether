@@ -24,7 +24,9 @@ pub enum TabKind {
     Terminal,
     Sftp,
     /// A local shell (`pty::shells`); dropped on restore if that shell is gone.
-    Local { shell_id: String },
+    Local {
+        shell_id: String,
+    },
     /// A kind this version doesn't know (saved by a newer tether): skipped on restore
     /// instead of failing the whole workspace file. Never saved.
     Unknown,
@@ -73,15 +75,7 @@ pub struct TabSpec {
 
 impl TabSpec {
     pub fn new(profile_id: Uuid, kind: TabKind) -> Self {
-        Self {
-            profile_id,
-            kind,
-            title: None,
-            cwd: None,
-            with_sftp: false,
-            sftp_local_cwd: None,
-            sftp_show_local: None,
-        }
+        Self { profile_id, kind, title: None, cwd: None, with_sftp: false, sftp_local_cwd: None, sftp_show_local: None }
     }
 }
 
@@ -345,10 +339,7 @@ mod tests {
 
     #[test]
     fn cwd_round_trips_and_stays_optional() {
-        let with_cwd = TabSpec {
-            cwd: Some(r"D:\Projects\Personal\tether".into()),
-            ..spec(Uuid::nil(), TabKind::Local { shell_id: "pwsh".into() })
-        };
+        let with_cwd = TabSpec { cwd: Some(r"D:\Projects\Personal\tether".into()), ..spec(Uuid::nil(), TabKind::Local { shell_id: "pwsh".into() }) };
         let text = serde_json::to_string(&with_cwd).unwrap();
         assert!(text.contains(r"D:\\Projects\\Personal\\tether"), "{text}");
         assert_eq!(serde_json::from_str::<TabSpec>(&text).unwrap(), with_cwd);

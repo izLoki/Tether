@@ -273,6 +273,19 @@ impl ShellState {
         &self.blocks
     }
 
+    /// Drop decorations for content actually erased by ED/RIS, preserving blocks
+    /// wholly in scrollback. Called at the escape sequence, before later marks.
+    pub fn erase_display(&mut self, screen: &mut vt100::Screen, history: bool) {
+        self.sync_inner(screen, false);
+        let top = self.lines.top_line(0);
+        self.blocks.retain(|b| !history && b.last_line() < top);
+        self.pending_command = None;
+        self.clear_votes = 0;
+        // Erased screen rows are no longer valid eviction anchors.
+        self.lines.anchor = None;
+        self.version += 1;
+    }
+
     pub fn branch(&self) -> Option<&str> {
         self.branch.as_deref()
     }
@@ -423,7 +436,13 @@ impl ShellState {
                 let lazy = self.lazy_marks;
                 if let Some(b) = self.blocks.back_mut().filter(|b| b.phase == Phase::Running) {
                     // Lazy marks: the end is fixed up when the next prompt settles.
-                    let end = if lazy { 0 } else if col > 0 { line + 1 } else { line };
+                    let end = if lazy {
+                        0
+                    } else if col > 0 {
+                        line + 1
+                    } else {
+                        line
+                    };
                     b.phase = Phase::Done;
                     b.exit = exit;
                     b.end_line = Some(end.max(b.output_line.unwrap_or(end)));

@@ -341,10 +341,7 @@ mod tests {
         let (_, bgs, wide) = build_row(p.screen(), 0, 20, &Palette::TETHER_NIGHT, &FontId::monospace(12.0));
         let red = Palette::TETHER_NIGHT.ansi[1];
         let green = Palette::TETHER_NIGHT.ansi[2];
-        assert_eq!(
-            bgs,
-            vec![BgSpan { col: 0, len: 3, color: red }, BgSpan { col: 3, len: 2, color: green }, BgSpan { col: 7, len: 3, color: red }]
-        );
+        assert_eq!(bgs, vec![BgSpan { col: 0, len: 3, color: red }, BgSpan { col: 3, len: 2, color: green }, BgSpan { col: 7, len: 3, color: red }]);
         assert_eq!(wide, vec![7]);
     }
 

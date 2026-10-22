@@ -23,9 +23,7 @@ impl TetherApp {
         for a in actions {
             match a {
                 TabAction::Focus(uid) => {
-                    if self.mini_dock.restore_by_uid(ctx, &mut self.dock, uid) {
-                        self.show_tab(uid);
-                    } else if !self.detached.focus_tab(ctx, uid) {
+                    if self.mini_dock.restore_by_uid(ctx, &mut self.dock, uid) || !self.detached.focus_tab(ctx, uid) {
                         self.show_tab(uid);
                     }
                 }
@@ -38,25 +36,15 @@ impl TetherApp {
                     self.show_tab(uid);
                 }
                 TabAction::StartRename(uid) => {
-                    if let Some(tab) = self
-                        .dock
-                        .iter_all_tabs_mut()
-                        .map(|(_, t)| t)
-                        .chain(self.detached.tabs_mut())
-                        .chain(self.mini_dock.tabs_mut())
-                        .find(|t| t.uid == uid)
+                    if let Some(tab) =
+                        self.dock.iter_all_tabs_mut().map(|(_, t)| t).chain(self.detached.tabs_mut()).chain(self.mini_dock.tabs_mut()).find(|t| t.uid == uid)
                     {
                         self.rename = Some((uid, tab.display_title()));
                     }
                 }
                 TabAction::Rename(uid, name) => {
-                    if let Some(tab) = self
-                        .dock
-                        .iter_all_tabs_mut()
-                        .map(|(_, t)| t)
-                        .chain(self.detached.tabs_mut())
-                        .chain(self.mini_dock.tabs_mut())
-                        .find(|t| t.uid == uid)
+                    if let Some(tab) =
+                        self.dock.iter_all_tabs_mut().map(|(_, t)| t).chain(self.detached.tabs_mut()).chain(self.mini_dock.tabs_mut()).find(|t| t.uid == uid)
                     {
                         tab.rename(name);
                     }
@@ -313,7 +301,13 @@ impl TetherApp {
         let rect = ui.available_rect_before_wrap().shrink(6.0);
         let see_through = crate::themes::see_through();
         let fill = if see_through { theme::surface().gamma_multiply(crate::themes::window_opacity()) } else { theme::surface() };
-        ui.painter().rect(rect, egui::CornerRadius::same(theme::RADIUS), fill, egui::Stroke::new(1.0, theme::border().gamma_multiply(0.55)), egui::StrokeKind::Inside);
+        ui.painter().rect(
+            rect,
+            egui::CornerRadius::same(theme::RADIUS),
+            fill,
+            egui::Stroke::new(1.0, theme::border().gamma_multiply(0.55)),
+            egui::StrokeKind::Inside,
+        );
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt(("zoomed", uid)));
         child.set_clip_rect(rect);
         viewer.ui(&mut child, tab);
@@ -325,7 +319,13 @@ impl TetherApp {
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Maximized pane: restore"));
         let h = ui.ctx().animate_bool_with_time(resp.id, resp.hovered(), theme::anim_time(0.1));
         let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("zoom_pill_layer")));
-        fg.rect(pill, egui::CornerRadius::same(11), theme::surface_2().lerp_to_gamma(theme::surface_3(), h), egui::Stroke::new(1.0, theme::accent().gamma_multiply(0.5)), egui::StrokeKind::Inside);
+        fg.rect(
+            pill,
+            egui::CornerRadius::same(11),
+            theme::surface_2().lerp_to_gamma(theme::surface_3(), h),
+            egui::Stroke::new(1.0, theme::accent().gamma_multiply(0.5)),
+            egui::StrokeKind::Inside,
+        );
         fg.galley(pill.min + egui::vec2(11.0, 5.0), galley, theme::text());
         if resp.clicked() {
             self.toggle_zoom();

@@ -6,6 +6,49 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Pos2};
 
+/// One clipboard action per key gesture, including delayed Windows key-up events
+/// and egui re-running a layout pass with the same input.
+#[derive(Default)]
+pub(super) struct PasteGuard {
+    handled: bool,
+    was_down: bool,
+    event_frame: Option<u64>,
+    fallback_frame: Option<u64>,
+}
+
+impl PasteGuard {
+    pub fn explicit(&mut self, frame: u64) -> bool {
+        if self.event_frame == Some(frame) {
+            return false;
+        }
+        self.event_frame = Some(frame);
+        self.handled = true;
+        true
+    }
+
+    pub fn fallback(&mut self, frame: u64, down: bool, released: bool, had_paste: bool) -> bool {
+        if self.fallback_frame == Some(frame) {
+            return false;
+        }
+        self.fallback_frame = Some(frame);
+        if down && !self.was_down && !had_paste {
+            self.handled = false;
+        }
+        self.was_down = down;
+        if had_paste {
+            self.handled = true;
+        }
+        let paste = !self.handled && (down || released);
+        self.handled |= paste;
+        // Physical key state can go up before winit delivers KeyUp. Keep the latch
+        // until that event arrives; otherwise its release pastes the image again.
+        if released {
+            self.handled = false;
+        }
+        paste
+    }
+}
+
 /// Pointer position (in points, relative to this viewport) for routing an Explorer drop.
 /// Windows sends no `CursorMoved` during an OLE drag, so the live OS cursor is used there.
 pub fn drop_pointer_pos(ctx: &egui::Context) -> Option<Pos2> {
@@ -81,7 +124,7 @@ pub fn clipboard_has_image() -> bool {
 
 #[cfg(not(windows))]
 pub fn clipboard_has_image() -> bool {
-    false
+    arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_image()).is_ok()
 }
 
 /// The clipboard holds plain text (egui-winit already turns it into `Event::Paste`).
@@ -94,7 +137,7 @@ pub fn clipboard_has_text() -> bool {
 
 #[cfg(not(windows))]
 pub fn clipboard_has_text() -> bool {
-    true
+    arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()).is_ok()
 }
 
 /// Paths of files copied in Explorer (`CF_HDROP`).
@@ -121,6 +164,28 @@ fn quote_path(p: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delayed_release_does_not_repeat_the_first_image() {
+        let mut guard = PasteGuard::default();
+        assert!(guard.fallback(1, true, false, false));
+        assert!(!guard.fallback(2, false, false, false));
+        assert!(!guard.fallback(3, false, true, false));
+        assert!(!guard.fallback(3, false, true, false), "a repeated layout pass is still the same input");
+        assert!(guard.fallback(4, true, false, false), "a new intentional paste must work");
+    }
+
+    #[test]
+    fn explicit_paste_and_short_key_presses_are_handled_once() {
+        let mut guard = PasteGuard::default();
+        assert!(guard.explicit(1));
+        assert!(!guard.explicit(1));
+        assert!(!guard.fallback(1, true, false, true));
+        assert!(!guard.fallback(2, false, true, false));
+        assert!(guard.fallback(3, false, true, false), "a new press seen only at release is supported");
+        assert!(!guard.fallback(3, false, true, false));
+        assert!(guard.explicit(4), "separate paste events may attach the same image again");
+    }
 
     #[test]
     fn formats_paths_with_quotes_only_when_needed() {

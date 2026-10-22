@@ -76,6 +76,8 @@ struct Live {
 
 pub struct PathField {
     pub text: String,
+    /// Launch forms retain edits when another control takes focus.
+    pub retain_edits: bool,
     id: Id,
     style: PathStyle,
     cycle: Option<Cycle>,
@@ -95,6 +97,7 @@ impl PathField {
     pub fn new(id: Id, style: PathStyle) -> Self {
         Self {
             text: String::new(),
+            retain_edits: false,
             id,
             style,
             cycle: None,
@@ -159,7 +162,7 @@ impl PathField {
         let mut events = Vec::new();
         let focused = ui.memory(|m| m.has_focus(self.id));
         if !focused && !self.popup_hovered(ui) {
-            if self.text != cwd {
+            if !self.retain_edits && self.text != cwd {
                 self.text = cwd.to_string();
             }
             self.cycle = None;

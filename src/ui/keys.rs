@@ -45,6 +45,9 @@ fn ctrl_byte(key: Key) -> Option<u8> {
 /// Bytes for a key press, or `None` when the key is handled as text / clipboard.
 pub fn encode(key: Key, m: Modifiers, app_cursor: bool) -> Option<Vec<u8>> {
     let bytes = match key {
+        // Meta+Enter is understood as an inserted newline by agent TUIs. Shell
+        // integration binds the same sequence to each shell's multiline editor.
+        Key::Enter if m.shift && !m.ctrl && !m.alt => b"\x1b\r".to_vec(),
         Key::Enter => b"\r".to_vec(),
         Key::Backspace if m.ctrl => vec![0x08],
         Key::Backspace => vec![0x7f],
@@ -98,6 +101,9 @@ pub fn encode_text(text: &str, alt: bool) -> Vec<u8> {
 /// rest as typed commands.
 pub fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
     let normalized: String = text.replace("\r\n", "\r").replace('\n', "\r").chars().filter(|&c| c == '\r' || c == '\t' || !c.is_control()).collect();
+    if normalized.is_empty() {
+        return Vec::new();
+    }
     if bracketed { format!("\x1b[200~{normalized}\x1b[201~").into_bytes() } else { normalized.into_bytes() }
 }
 
@@ -119,6 +125,12 @@ mod tests {
     }
 
     #[test]
+    fn shift_enter_does_not_submit() {
+        assert_eq!(encode(Key::Enter, Modifiers::SHIFT, false).unwrap(), b"\x1b\r");
+        assert_eq!(encode(Key::Enter, NONE, false).unwrap(), b"\r");
+    }
+
+    #[test]
     fn arrows_respect_application_cursor_mode() {
         assert_eq!(encode(Key::ArrowUp, NONE, false).unwrap(), b"\x1b[A");
         assert_eq!(encode(Key::ArrowUp, NONE, true).unwrap(), b"\x1bOA");
@@ -136,6 +148,8 @@ mod tests {
 
     #[test]
     fn paste_normalizes_newlines_and_brackets() {
+        assert!(encode_paste("", true).is_empty(), "an image-only drop must not trigger the CLI's native clipboard paste");
+        assert!(encode_paste("", false).is_empty());
         assert_eq!(encode_paste("a\r\nb\nc", false), b"a\rb\rc");
         assert_eq!(encode_paste("x", true), b"\x1b[200~x\x1b[201~");
         assert_eq!(encode_paste("a\x1b[201~rm -rf ~\tb\x07", true), b"\x1b[200~a[201~rm -rf ~\tb\x1b[201~");

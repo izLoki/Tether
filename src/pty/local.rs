@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 use super::shells::ShellSpec;
 use super::tree::ProcessTree;
-use crate::ssh::terminal::{LinkState, TERM_NAME, TermCmd, TerminalHandle};
+use crate::ssh::terminal::{LinkState, TermCmd, TerminalHandle};
 
 const READ_BUF: usize = 64 * 1024;
 /// How long to wait for trailing output once the shell has exited.
@@ -47,10 +47,8 @@ pub fn run_local_pty(
         }
         None => cmd.args(&spec.args),
     }
-    cmd.env("TERM", TERM_NAME);
-    cmd.env("COLORTERM", "truecolor");
+    crate::terminal_capabilities::local(&mut cmd);
     cmd.env("TETHER_SESSION", &term.tag);
-    cmd.env("TERM_PROGRAM", "tether");
     // Where `tether hook` reports agent status (see `agents::ipc`).
     for (key, value) in crate::agents::ipc::session_env() {
         cmd.env(key, value);

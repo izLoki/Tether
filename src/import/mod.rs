@@ -2,7 +2,9 @@
 //! user, key file path) are imported; passwords stay where they are.
 
 pub mod bitvise;
+pub mod discovery;
 pub mod openssh;
+pub mod setup;
 
 use std::path::PathBuf;
 
@@ -12,6 +14,7 @@ use crate::profile::{Profile, ProfileStore};
 pub enum Source {
     Bitvise,
     OpenSsh,
+    Tether,
 }
 
 impl Source {
@@ -19,6 +22,7 @@ impl Source {
         match self {
             Source::Bitvise => "Bitvise",
             Source::OpenSsh => "SSH config",
+            Source::Tether => "Tether setup",
         }
     }
 }

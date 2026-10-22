@@ -142,6 +142,9 @@ pub struct SftpView {
     session: Arc<Mutex<Option<Session>>>,
     /// Result of a pending terminal-folder lookup, consumed on the UI thread.
     jump: Arc<Mutex<Option<String>>>,
+    /// A terminal link picked before the SFTP channel has finished connecting.
+    pending_location: Option<(String, Option<TerminalHandle>)>,
+    location_epoch: Arc<std::sync::atomic::AtomicU64>,
     jumping: Arc<AtomicBool>,
     /// Files opened with the PC's default app, uploaded on every save.
     watcher: Watcher,
@@ -165,15 +168,7 @@ impl SftpView {
         let local_history = sftp_history::load_local(&local_history_file, profile.id);
         let local_known = sftp_history::load_known(&local_known_file, profile.id);
         let sftp_cfg = settings::get().sftp.clone();
-        let initial_local = if sftp_cfg.resume_last_dir {
-            local_history
-                .iter()
-                .map(PathBuf::from)
-                .find(|p| p.is_dir())
-                .unwrap_or(home)
-        } else {
-            home
-        };
+        let initial_local = if sftp_cfg.resume_last_dir { local_history.iter().map(PathBuf::from).find(|p| p.is_dir()).unwrap_or(home) } else { home };
         Self {
             remote: Arc::new(Mutex::new(RemoteState::default())),
             cache: dir_cache::host_cache(profile.id),
@@ -213,6 +208,8 @@ impl SftpView {
             linked_terminal: None,
             session: Arc::default(),
             jump: Arc::default(),
+            pending_location: None,
+            location_epoch: Arc::default(),
             jumping: Arc::default(),
             watcher: Watcher::default(),
             open_refused: Arc::default(),
@@ -272,6 +269,16 @@ impl SftpView {
 
     pub fn is_ready(&self) -> bool {
         self.remote.lock().map(|s| matches!(s.link, Link::Ready { .. })).unwrap_or(false)
+    }
+
+    pub fn browse_path(&mut self, path: String) {
+        self.location_epoch.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut jump) = self.jump.lock() {
+            *jump = None;
+        }
+        self.pending_location = Some((path, self.linked_terminal.clone()));
+        self.show_remote = true;
+        self.ctx.request_repaint();
     }
 
     fn sftp(&self) -> Option<Arc<Sftp>> {
@@ -494,13 +501,7 @@ impl SftpView {
             return;
         }
         set(&SFTP_CLIPBOARD, |slot| {
-            *slot = Some(SftpClipboard {
-                from: side,
-                local_dir: self.local_cwd.clone(),
-                remote_dir: self.remote_cwd(),
-                names,
-                os_seq: clipboard_seq(),
-            });
+            *slot = Some(SftpClipboard { from: side, local_dir: self.local_cwd.clone(), remote_dir: self.remote_cwd(), names, os_seq: clipboard_seq() });
         });
     }
 
@@ -662,6 +663,11 @@ impl SftpView {
 
     /// Draws the view; the returned action asks the app to reconnect or close the tab.
     pub fn ui(&mut self, ui: &mut Ui) -> StatusAction {
+        if self.is_ready()
+            && let Some((path, terminal)) = self.pending_location.take()
+        {
+            self.resolve_location(path, terminal);
+        }
         self.poll_open();
         self.poll_local();
         if let Some(path) = self.jump.lock().ok().and_then(|mut j| j.take()) {

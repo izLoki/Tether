@@ -14,11 +14,30 @@ pub enum View {
     Workspaces,
     /// AI agents running in terminals.
     Agents,
+    /// Dedicated Codex terminal sessions.
+    Codex,
 }
 
 impl View {
     /// Every view, in the default order of the primary side bar.
-    pub const ALL: [View; 4] = [View::Sessions, View::Hosts, View::Workspaces, View::Agents];
+    pub const ALL: [View; 5] = [View::Sessions, View::Hosts, View::Workspaces, View::Agents, View::Codex];
+
+    /// The Claude section keeps support for other detected CLIs; Codex has its own view.
+    pub fn includes_agent(self, kind: crate::agents::AgentKind) -> bool {
+        match self {
+            View::Agents => kind != crate::agents::AgentKind::Codex,
+            View::Codex => kind == crate::agents::AgentKind::Codex,
+            _ => false,
+        }
+    }
+
+    pub fn agent(self) -> Option<crate::agents::AgentKind> {
+        match self {
+            View::Agents => Some(crate::agents::AgentKind::Claude),
+            View::Codex => Some(crate::agents::AgentKind::Codex),
+            _ => None,
+        }
+    }
 
     pub fn title(self) -> &'static str {
         match self {
@@ -26,6 +45,7 @@ impl View {
             View::Sessions => "Sessions",
             View::Workspaces => "Workspaces",
             View::Agents => "Agents",
+            View::Codex => "Codex",
         }
     }
 }
@@ -314,15 +334,15 @@ mod tests {
         let mut l = ViewLayout::default();
         // Sessions, Hosts, Workspaces, Agents → drop Sessions before Agents (index 3).
         l.move_view(View::Sessions, Container::Primary, Some(3));
-        assert_eq!(order(&l, Container::Primary), vec![View::Hosts, View::Workspaces, View::Sessions, View::Agents]);
+        assert_eq!(order(&l, Container::Primary), vec![View::Hosts, View::Workspaces, View::Sessions, View::Agents, View::Codex]);
         l.move_view(View::Agents, Container::Primary, Some(0));
-        assert_eq!(order(&l, Container::Primary), vec![View::Agents, View::Hosts, View::Workspaces, View::Sessions]);
+        assert_eq!(order(&l, Container::Primary), vec![View::Agents, View::Hosts, View::Workspaces, View::Sessions, View::Codex]);
         l.move_view(View::Hosts, Container::Primary, None);
-        assert_eq!(order(&l, Container::Primary), vec![View::Agents, View::Workspaces, View::Sessions, View::Hosts]);
+        assert_eq!(order(&l, Container::Primary), vec![View::Agents, View::Workspaces, View::Sessions, View::Codex, View::Hosts]);
         // Onto itself: no change.
         l.move_view(View::Workspaces, Container::Primary, Some(1));
         l.move_view(View::Workspaces, Container::Primary, Some(2));
-        assert_eq!(order(&l, Container::Primary), vec![View::Agents, View::Workspaces, View::Sessions, View::Hosts]);
+        assert_eq!(order(&l, Container::Primary), vec![View::Agents, View::Workspaces, View::Sessions, View::Codex, View::Hosts]);
     }
 
     #[test]
@@ -359,7 +379,7 @@ mod tests {
         )
         .unwrap();
         l.normalize();
-        assert_eq!(order(&l, Container::Primary), vec![View::Hosts, View::Sessions]);
+        assert_eq!(order(&l, Container::Primary), vec![View::Hosts, View::Sessions, View::Codex]);
         assert_eq!(order(&l, Container::Panel), vec![View::Agents]);
         assert_eq!(l.hidden, vec![View::Workspaces]);
         assert_eq!(l.primary.active, Some(View::Hosts));
@@ -374,6 +394,27 @@ mod tests {
         l.panel.size = f32::NAN;
         assert_eq!(l.size(Container::Primary), SIDE_MAX);
         assert_eq!(l.size(Container::Panel), PANEL_DEFAULT);
+    }
+
+    #[test]
+    fn codex_is_added_to_existing_layouts_and_moves_independently() {
+        let mut l: ViewLayout = serde_json::from_str(
+            r#"{"primary":{"views":["Hosts","Sessions"],"active":"Hosts"},"panel":{"views":["Agents"],"active":"Agents"},"hidden":["Workspaces"]}"#,
+        )
+        .unwrap();
+        l.normalize();
+        assert_eq!(l.container_of(View::Codex), Some(Container::Primary));
+        assert_eq!(l.primary.active, Some(View::Hosts));
+        l.move_view(View::Codex, Container::Secondary, None);
+        assert!(l.is_shown(View::Codex) && l.is_shown(View::Agents));
+        l.hide(View::Codex);
+        assert!(l.is_shown(View::Agents));
+        l.reveal(View::Codex);
+        assert!(l.is_shown(View::Codex));
+        assert!(View::Codex.includes_agent(crate::agents::AgentKind::Codex));
+        assert!(!View::Codex.includes_agent(crate::agents::AgentKind::Claude));
+        assert!(!View::Agents.includes_agent(crate::agents::AgentKind::Codex));
+        assert!(View::Agents.includes_agent(crate::agents::AgentKind::Claude));
     }
 
     #[test]
