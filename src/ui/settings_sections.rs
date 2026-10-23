@@ -80,14 +80,24 @@ fn terminal(ui: &mut Ui, s: &mut Settings, st: &mut SectionState, now: f64) {
     w::card(ui, Some("Text"), |ui| {
         theme_gallery::font_row(ui, font);
         w::separator(ui);
-        w::row(ui, "Font size", "Ctrl + / Ctrl Shift - / Ctrl 0 in a terminal", |ui| {
-            let spec =
-                SliderSpec { min: TerminalSettings::FONT_MIN, max: TerminalSettings::FONT_MAX, step: 0.5, log: false, format: &|v| format!("{v:.1} pt") };
-            let mut v = t.font_size();
-            if w::slider_with_value(ui, &mut v, &spec).changed() {
-                t.font_size = v;
-            }
-        });
+        w::row(
+            ui,
+            "Font size",
+            &format!(
+                "{} / {} / {} in a terminal",
+                crate::keybindings::label(crate::keybindings::Action::FontBigger),
+                crate::keybindings::label(crate::keybindings::Action::FontSmaller),
+                crate::keybindings::label(crate::keybindings::Action::FontReset)
+            ),
+            |ui| {
+                let spec =
+                    SliderSpec { min: TerminalSettings::FONT_MIN, max: TerminalSettings::FONT_MAX, step: 0.5, log: false, format: &|v| format!("{v:.1} pt") };
+                let mut v = t.font_size();
+                if w::slider_with_value(ui, &mut v, &spec).changed() {
+                    t.font_size = v;
+                }
+            },
+        );
         w::separator(ui);
         w::row(ui, "Line height", "Extra breathing room between lines", |ui| {
             let spec = SliderSpec {

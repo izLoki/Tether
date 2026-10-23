@@ -82,7 +82,10 @@ fn endpoint_name() -> String {
     if cfg!(windows) {
         format!(r"\\.\pipe\tether-{}-{id}", std::process::id())
     } else {
-        std::env::temp_dir().join(format!("tether-{}-{id}", std::process::id())).join("ipc.sock").to_string_lossy().into_owned()
+        // Darwin's sockaddr_un has only 104 bytes. The usual /var/folders TMPDIR
+        // nearly fills that once the random directory and filename are appended.
+        let root = if cfg!(target_os = "macos") { std::path::PathBuf::from("/tmp") } else { std::env::temp_dir() };
+        root.join(format!("tether-{}-{id}", std::process::id())).join("ipc.sock").to_string_lossy().into_owned()
     }
 }
 
@@ -231,6 +234,8 @@ mod tests {
         let (a, b) = (endpoint_name(), endpoint_name());
         assert_ne!(a, b);
         assert!(a.len() > 40, "{a}");
+        #[cfg(target_os = "macos")]
+        assert!(a.starts_with("/tmp/tether-") && a.len() < 104, "Darwin socket path too long: {a}");
         #[cfg(windows)]
         {
             assert!(super::super::hook::valid_endpoint(&a));

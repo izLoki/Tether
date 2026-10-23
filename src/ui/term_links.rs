@@ -183,12 +183,12 @@ impl LinksState {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             if let Some(link) = &self.hovered {
                 let tip = match &link.target {
-                    LinkTarget::Url(u) => format!("{u}\nClick for options · Ctrl+click to open"),
+                    LinkTarget::Url(u) => format!("{u}\nClick for options · {}+click to open", crate::platform::primary_label()),
                     LinkTarget::LocalPath { resolved, is_dir, .. } => {
                         let kind = if *is_dir { "Folder" } else { "File" };
-                        format!("{kind}: {}\nClick for options · Ctrl+click to open", resolved.display())
+                        format!("{kind}: {}\nClick for options · {}+click to open", resolved.display(), crate::platform::primary_label())
                     }
-                    LinkTarget::RemotePath { path, .. } => format!("Remote: {path}\nClick to open SFTP · Right-click for options · Ctrl+click to edit"),
+                    LinkTarget::RemotePath { path, .. } => format!("Remote: {path}\nClick to open SFTP · Right-click for options · {}+click to edit", crate::platform::primary_label()),
                 };
                 egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), Id::new("term_link_tip"), egui::PopupAnchor::Pointer).gap(10.0).show(|ui| {
                     ui.label(egui::RichText::new(tip).size(11.5).color(theme::text()));
@@ -230,12 +230,12 @@ impl LinksState {
                             let full = resolved.display().to_string();
                             path_header(ui, &full);
                             ui.separator();
-                            let open_label = if *is_dir { "📁  Open folder in Explorer" } else { "↗  Open file" };
+                            let open_label = if *is_dir { crate::platform::open_folder_label() } else { "↗  Open file" };
                             if menu_btn(ui, open_label) {
                                 let _ = crate::remote_edit::open_with_system(resolved);
                                 close = true;
                             }
-                            if !*is_dir && menu_btn(ui, "📂  Show in Explorer") {
+                            if !*is_dir && menu_btn(ui, crate::platform::reveal_label()) {
                                 let _ = reveal_in_explorer(resolved);
                                 close = true;
                             }
@@ -732,11 +732,11 @@ fn try_resolve_one(cwd: Option<&str>, raw: &str) -> Option<(PathBuf, bool)> {
 }
 
 fn expand_tilde_and_msys(raw: &str) -> String {
-    if raw == "~" || raw.starts_with("~/") || raw.starts_with(r"~\") {
-        if let Some(home) = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()) {
-            let rest = raw.strip_prefix('~').unwrap_or_default().trim_start_matches(['/', '\\']);
-            return home.join(rest).display().to_string();
-        }
+    if (raw == "~" || raw.starts_with("~/") || raw.starts_with(r"~\"))
+        && let Some(home) = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
+    {
+        let rest = raw.strip_prefix('~').unwrap_or_default().trim_start_matches(['/', '\\']);
+        return home.join(rest).display().to_string();
     }
     #[cfg(windows)]
     {

@@ -8,6 +8,15 @@
 pub fn desktop(title: String, body: String) {
     let (title, body) = (clean(&title), clean(&body));
     let _ = std::thread::Builder::new().name("tether-toast".into()).spawn(move || {
+        #[cfg(target_os = "macos")]
+        {
+            // Set our bundle identity before the library falls back to Finder.
+            // OnceLock serializes initialization across simultaneous session alerts.
+            static APP: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+            APP.get_or_init(|| {
+                let _ = notify_rust::set_application("io.github.izloki.tether");
+            });
+        }
         let _ = notify_rust::Notification::new().appname("tether").summary(&title).body(&body).show();
     });
 }

@@ -216,7 +216,8 @@ fn cheat_sheet(ui: &mut Ui, out: &mut Option<WelcomeAction>) {
 fn focus_keys() -> Option<String> {
     let all = [Action::FocusPaneLeft, Action::FocusPaneRight, Action::FocusPaneUp, Action::FocusPaneDown].map(keybindings::binding);
     let first = all[0].clone()?;
-    let same = all.iter().all(|b| b.as_ref().is_some_and(|b| b.ctrl == first.ctrl && b.alt == first.alt && b.shift == first.shift));
+    let same =
+        all.iter().all(|b| b.as_ref().is_some_and(|b| b.ctrl == first.ctrl && b.mac_cmd == first.mac_cmd && b.alt == first.alt && b.shift == first.shift));
     if !same {
         return Some(first.label());
     }

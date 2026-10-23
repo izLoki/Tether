@@ -42,7 +42,21 @@ fn settle(h: &mut Harness<'_, TetherApp>, secs: f32) {
 }
 
 fn keys(h: &mut Harness<'_, TetherApp>, m: Modifiers, k: Key) {
-    h.key_press_modifiers(m, k);
+    let action = if m == CS {
+        match k {
+            Key::T => Some(tether::keybindings::Action::NewLocalTerminal),
+            Key::D => Some(tether::keybindings::Action::SplitRight),
+            Key::E => Some(tether::keybindings::Action::SplitDown),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if let Some(b) = action.and_then(|a| a.default_binding()) {
+        h.key_press_modifiers(b.modifiers(), b.egui_key().unwrap());
+    } else {
+        h.key_press_modifiers(m, k);
+    }
     h.run_steps(4);
 }
 
@@ -62,7 +76,7 @@ fn pointer(h: &mut Harness<'_, TetherApp>, pos: egui::Pos2, pressed: Option<bool
     h.run_steps(2);
 }
 
-const CS: Modifiers = Modifiers { ctrl: true, shift: true, alt: false, mac_cmd: false, command: true };
+const CS: Modifiers = Modifiers { ctrl: !cfg!(target_os = "macos"), shift: true, alt: false, mac_cmd: cfg!(target_os = "macos"), command: true };
 
 #[test]
 fn layout_screens() {
@@ -212,5 +226,16 @@ fn layout_screens() {
     h.run_steps(5);
     h.key_press(Key::Enter);
     settle(&mut h, 0.8);
+    h.get_by_label_contains("Drag an icon onto another strip");
     shot(&mut h, "31-layout-settings");
+    // MacBook-sized windows and Retina scaling must keep the settings usable.
+    h.set_size(egui::vec2(760.0, 480.0));
+    h.run_steps(20);
+    h.get_by_label_contains("Drag an icon onto another strip");
+    shot(&mut h, "32-layout-minimum");
+    // Native display density is independent of the user's UI zoom preference.
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(2.0);
+    h.run_steps(20);
+    assert_eq!(h.ctx.pixels_per_point(), 2.0);
+    shot(&mut h, "33-layout-retina");
 }

@@ -222,13 +222,13 @@ pub fn show(ui: &mut Ui, side: Side, rows: &[Row], state: &mut ListState, transf
     });
 
     bg.context_menu(|ui| {
-        if ui.add(egui::Button::new("Paste").shortcut_text("Ctrl+V")).clicked() {
+        if ui.add(egui::Button::new("Paste").shortcut_text(crate::platform::shortcut("V"))).clicked() {
             actions.push(ListAction::Paste);
         }
-        if ui.add(egui::Button::new("New folder").shortcut_text("F7")).clicked() {
+        if ui.add(egui::Button::new("New folder").shortcut_text(if cfg!(target_os = "macos") { "⌘+Shift+N" } else { "F7" })).clicked() {
             actions.push(ListAction::NewFolder);
         }
-        if ui.add(egui::Button::new("Refresh").shortcut_text("F5")).clicked() {
+        if ui.add(egui::Button::new("Refresh").shortcut_text(crate::keybindings::label(crate::keybindings::Action::SftpRefresh))).clicked() {
             actions.push(ListAction::Refresh);
         }
     });
@@ -273,20 +273,23 @@ fn row_menu(ui: &mut Ui, side: Side, row: &Row, i: usize, rows: &[Row], state: &
     if ui.button(transfer_label).clicked() {
         actions.push(ListAction::Transfer(names.clone()));
     }
-    if ui.add(egui::Button::new("Copy").shortcut_text("Ctrl+C")).clicked() {
+    if ui.add(egui::Button::new("Copy").shortcut_text(crate::platform::shortcut("C"))).clicked() {
         actions.push(ListAction::Copy(names.clone()));
     }
-    if ui.add(egui::Button::new("Paste").shortcut_text("Ctrl+V")).clicked() {
+    if ui.add(egui::Button::new("Paste").shortcut_text(crate::platform::shortcut("V"))).clicked() {
         actions.push(ListAction::Paste);
     }
-    if ui.add(egui::Button::new("Rename").shortcut_text("F2")).clicked() {
+    if ui.add(egui::Button::new("Rename").shortcut_text(if cfg!(target_os = "macos") { "Return" } else { "F2" })).clicked() {
         actions.push(ListAction::Rename(row.name.clone()));
     }
     if ui.button("Copy path").clicked() {
         actions.push(ListAction::CopyPath(row.name.clone()));
     }
     ui.separator();
-    if ui.add(egui::Button::new(egui::RichText::new("Delete").color(theme::danger())).shortcut_text("Del")).clicked() {
+    if ui
+        .add(egui::Button::new(egui::RichText::new("Delete").color(theme::danger())).shortcut_text(if cfg!(target_os = "macos") { "⌘+⌫" } else { "Del" }))
+        .clicked()
+    {
         actions.push(ListAction::Delete(names));
     }
 }
@@ -351,7 +354,7 @@ fn handle_keyboard(ui: &mut Ui, side: Side, rows: &[Row], state: &mut ListState,
     let mut typed = false;
     for (key, mods) in keys {
         handled = true;
-        if key == Key::Backspace {
+        if key == Key::Backspace && !mods.command {
             typed |= state.type_ahead.pop(now) && !state.type_ahead.buffer().is_empty();
         } else {
             apply_key(side, key, mods, rows, state, actions, scroll_to);
@@ -375,7 +378,10 @@ fn handle_keyboard(ui: &mut Ui, side: Side, rows: &[Row], state: &mut ListState,
 
 fn is_nav_key(key: Key, mods: Modifiers) -> bool {
     let plain = !mods.ctrl && !mods.alt && !mods.command;
-    let cmd = (mods.command || mods.ctrl) && !mods.shift && !mods.alt;
+    let cmd = (mods.command || (!cfg!(target_os = "macos") && mods.ctrl)) && !mods.shift && !mods.alt;
+    if cfg!(target_os = "macos") && mods.command && !mods.ctrl && !mods.alt {
+        return (key == Key::Backspace && !mods.shift) || (key == Key::N && mods.shift) || (matches!(key, Key::A | Key::C | Key::ArrowDown) && !mods.shift);
+    }
     match key {
         Key::ArrowUp | Key::ArrowDown | Key::Home | Key::End | Key::PageUp | Key::PageDown => plain,
         Key::Enter | Key::Backspace | Key::Delete | Key::F2 | Key::F7 => plain && !mods.shift,
@@ -385,6 +391,10 @@ fn is_nav_key(key: Key, mods: Modifiers) -> bool {
 }
 
 fn apply_key(side: Side, key: Key, mods: Modifiers, rows: &[Row], state: &mut ListState, actions: &mut Vec<ListAction>, scroll_to: &mut Option<usize>) {
+    if cfg!(target_os = "macos") && key == Key::ArrowDown && mods.command {
+        open_selected(side, rows, state, actions);
+        return;
+    }
     if let Some(next) = nav_target(key, state.cursor, rows.len()) {
         let m = Modifiers { shift: mods.shift, ..Modifiers::NONE };
         select(state, rows, next, m);
@@ -392,16 +402,16 @@ fn apply_key(side: Side, key: Key, mods: Modifiers, rows: &[Row], state: &mut Li
         return;
     }
     match key {
-        Key::Enter => {
-            if let Some(row) = state.cursor.and_then(|c| rows.get(c))
-                && (row.is_dir || side == Side::Remote)
-                && state.selected.len() <= 1
-            {
-                actions.push(open_action(row, side));
-            } else if !state.selected.is_empty() {
-                actions.push(ListAction::Transfer(state.selected.iter().cloned().collect()));
+        Key::Enter if cfg!(target_os = "macos") => {
+            if let Some(row) = state.cursor.and_then(|c| rows.get(c)) {
+                actions.push(ListAction::Rename(row.name.clone()));
             }
         }
+        Key::Enter => open_selected(side, rows, state, actions),
+        Key::Backspace if cfg!(target_os = "macos") && mods.command && !state.selected.is_empty() => {
+            actions.push(ListAction::Delete(state.selected.iter().cloned().collect()));
+        }
+        Key::N if cfg!(target_os = "macos") && mods.command && mods.shift => actions.push(ListAction::NewFolder),
         Key::Backspace => {}
         Key::Delete if !state.selected.is_empty() => actions.push(ListAction::Delete(state.selected.iter().cloned().collect())),
         Key::C if !state.selected.is_empty() => actions.push(ListAction::Copy(state.selected.iter().cloned().collect())),
@@ -415,6 +425,17 @@ fn apply_key(side: Side, key: Key, mods: Modifiers, rows: &[Row], state: &mut Li
             state.selected = rows.iter().map(|r| r.name.clone()).collect();
         }
         _ => {}
+    }
+}
+
+fn open_selected(side: Side, rows: &[Row], state: &ListState, actions: &mut Vec<ListAction>) {
+    if let Some(row) = state.cursor.and_then(|c| rows.get(c))
+        && (row.is_dir || side == Side::Remote)
+        && state.selected.len() <= 1
+    {
+        actions.push(open_action(row, side));
+    } else if !state.selected.is_empty() {
+        actions.push(ListAction::Transfer(state.selected.iter().cloned().collect()));
     }
 }
 
@@ -439,12 +460,12 @@ fn select(state: &mut ListState, rows: &[Row], i: usize, mods: Modifiers) {
     if mods.shift {
         let a = state.anchor.unwrap_or(i);
         let (lo, hi) = (a.min(i), a.max(i));
-        if !mods.ctrl {
+        if !(mods.command || (!cfg!(target_os = "macos") && mods.ctrl)) {
             state.selected.clear();
         }
         state.selected.extend(rows[lo..=hi].iter().map(|r| r.name.clone()));
         state.anchor = Some(a);
-    } else if mods.ctrl {
+    } else if mods.command || (!cfg!(target_os = "macos") && mods.ctrl) {
         if !state.selected.remove(&name) {
             state.selected.insert(name);
         }
@@ -655,7 +676,7 @@ mod tests {
         select(&mut s, &rows, 1, Modifiers::NONE);
         select(&mut s, &rows, 3, Modifiers { shift: true, ..Default::default() });
         assert_eq!(s.selected.iter().cloned().collect::<Vec<_>>(), ["b", "c", "d"]);
-        select(&mut s, &rows, 2, Modifiers { ctrl: true, ..Default::default() });
+        select(&mut s, &rows, 2, crate::keybindings::Binding::primary(Key::C, false, false).modifiers());
         assert_eq!(s.selected.iter().cloned().collect::<Vec<_>>(), ["b", "d"]);
     }
 
@@ -691,7 +712,12 @@ mod tests {
         apply_key(Side::Local, Key::Backspace, Modifiers::NONE, &rows, &mut s, &mut actions, &mut scroll);
         apply_key(Side::Local, Key::C, Modifiers::COMMAND, &rows, &mut s, &mut actions, &mut scroll);
         let shown: Vec<String> = actions.iter().map(|a| format!("{a:?}")).collect();
-        assert_eq!(shown, [r#"Open("a")"#, r#"Transfer(["d"])"#, r#"Delete(["d"])"#, r#"Copy(["d"])"#]);
+        let expected = if cfg!(target_os = "macos") {
+            [r#"Rename("a")"#, r#"Rename("d")"#, r#"Delete(["d"])"#, r#"Copy(["d"])"#]
+        } else {
+            [r#"Open("a")"#, r#"Transfer(["d"])"#, r#"Delete(["d"])"#, r#"Copy(["d"])"#]
+        };
+        assert_eq!(shown, expected);
     }
 
     #[test]
@@ -724,7 +750,40 @@ mod tests {
         apply_key(Side::Remote, Key::ArrowUp, Modifiers::SHIFT, &rows, &mut s, &mut actions, &mut scroll);
         apply_key(Side::Remote, Key::Enter, Modifiers::NONE, &rows, &mut s, &mut actions, &mut scroll);
         let shown: Vec<String> = actions.iter().map(|a| format!("{a:?}")).collect();
-        assert_eq!(shown, [r#"Open("a")"#, r#"OpenFile("d")"#, r#"Transfer(["c", "d"])"#]);
+        let expected = if cfg!(target_os = "macos") {
+            [r#"Rename("a")"#, r#"Rename("d")"#, r#"Rename("c")"#]
+        } else {
+            [r#"Open("a")"#, r#"OpenFile("d")"#, r#"Transfer(["c", "d"])"#]
+        };
+        assert_eq!(shown, expected);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn finder_shortcuts_open_rename_create_and_request_confirmed_delete() {
+        let rows = rows();
+        let mut state = ListState::default();
+        state.select_only(&rows, 1);
+        let mut actions = Vec::new();
+        let mut scroll = None;
+        for (key, mods) in [
+            (Key::ArrowDown, Modifiers::MAC_CMD | Modifiers::COMMAND),
+            (Key::Enter, Modifiers::NONE),
+            (Key::Backspace, Modifiers::MAC_CMD | Modifiers::COMMAND),
+            (Key::N, Modifiers::MAC_CMD | Modifiers::COMMAND | Modifiers::SHIFT),
+        ] {
+            assert!(is_nav_key(key, mods));
+            apply_key(Side::Remote, key, mods, &rows, &mut state, &mut actions, &mut scroll);
+        }
+        let shown: Vec<_> = actions.iter().map(|a| format!("{a:?}")).collect();
+        assert_eq!(shown, [r#"OpenFile("b")"#, r#"Rename("b")"#, r#"Delete(["b"])"#, "NewFolder"]);
+        let new_folder = Modifiers::MAC_CMD | Modifiers::COMMAND | Modifiers::SHIFT;
+        assert!(
+            crate::keybindings::Action::ALL.into_iter().all(|a| a.default_binding().is_none_or(|b| !b.matches(Key::N, new_folder))),
+            "global shortcuts must not steal Finder's new-folder gesture"
+        );
+        assert!(!is_nav_key(Key::C, Modifiers::CTRL));
+        assert!(!is_nav_key(Key::Backspace, Modifiers::MAC_CMD | Modifiers::SHIFT));
     }
 
     #[test]

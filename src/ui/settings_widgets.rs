@@ -33,17 +33,26 @@ pub fn card<R>(ui: &mut Ui, title: Option<&str>, add: impl FnOnce(&mut Ui) -> R)
 
 /// Title + description on the left, `control` right-aligned.
 pub fn row(ui: &mut Ui, title: &str, desc: &str, control: impl FnOnce(&mut Ui)) {
-    ui.horizontal(|ui| {
-        ui.set_min_height(40.0);
+    let labels = |ui: &mut Ui| {
+        ui.add_space(2.0);
+        ui.label(RichText::new(title).size(13.5).color(theme::text()));
+        if !desc.is_empty() {
+            ui.label(RichText::new(desc).size(11.5).color(theme::text_dim()));
+        }
+    };
+    if ui.available_width() < 520.0 {
         ui.vertical(|ui| {
-            ui.add_space(2.0);
-            ui.label(RichText::new(title).size(13.5).color(theme::text()));
-            if !desc.is_empty() {
-                ui.label(RichText::new(desc).size(11.5).color(theme::text_dim()));
-            }
+            labels(ui);
+            ui.add_space(4.0);
+            control(ui);
         });
-        ui.with_layout(Layout::right_to_left(Align::Center), control);
-    });
+    } else {
+        ui.horizontal(|ui| {
+            ui.set_min_height(40.0);
+            ui.vertical(labels);
+            ui.with_layout(Layout::right_to_left(Align::Center), control);
+        });
+    }
 }
 
 /// Hairline between rows inside a card.

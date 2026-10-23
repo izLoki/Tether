@@ -517,10 +517,6 @@ impl SftpView {
         let os_files = clipboard_files(pasted_text);
         if !os_files.is_empty() {
             self.upload_paths(os_files);
-            return;
-        }
-        if let Some(clip) = &internal {
-            self.paste_internal(clip);
         }
     }
 
@@ -826,7 +822,11 @@ impl SftpView {
 
     /// Mouse back / forward buttons and Alt+Left / Alt+Right over a pane.
     fn nav_input(&mut self, ui: &Ui, rect: Rect, side: Side) {
-        if self.dialog.is_some() || !ui.rect_contains_pointer(rect) {
+        let focused = match side {
+            Side::Local => self.local_list.has_focus(),
+            Side::Remote => self.remote_list.has_focus(),
+        };
+        if self.dialog.is_some() || !(ui.rect_contains_pointer(rect) || focused) {
             return;
         }
         // Only a text field blocks these (the file list keeps focus after a click).
@@ -1072,8 +1072,13 @@ fn parse_clipboard_paths(text: &str) -> Vec<PathBuf> {
         if trimmed.is_empty() {
             continue;
         }
-        let cleaned = trimmed.strip_prefix("file:///").or_else(|| trimmed.strip_prefix("file://")).unwrap_or(trimmed);
-        let path = PathBuf::from(cleaned);
+        let path = if trimmed.starts_with("file://") {
+            let Ok(url) = url::Url::parse(trimmed) else { return Vec::new() };
+            let Ok(path) = url.to_file_path() else { return Vec::new() };
+            path
+        } else {
+            PathBuf::from(trimmed)
+        };
         if !path.is_absolute() || !path.exists() {
             return Vec::new();
         }
@@ -1091,7 +1096,7 @@ fn clipboard_seq() -> u32 {
     unsafe { GetClipboardSequenceNumber() }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn clipboard_seq() -> u32 {
     0
 }
@@ -1185,9 +1190,33 @@ fn os_clipboard_files() -> Vec<PathBuf> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn os_clipboard_files() -> Vec<PathBuf> {
     Vec::new()
+}
+
+/// Finder copies file URLs, rather than plain text file paths. Use AppKit directly;
+/// pbpaste only exposes text and loses multi-file selections and escaped characters.
+#[cfg(target_os = "macos")]
+fn os_clipboard_files() -> Vec<PathBuf> {
+    use objc2_app_kit::NSPasteboard;
+    use objc2_foundation::ns_string;
+    let board = NSPasteboard::generalPasteboard();
+    let Some(items) = board.pasteboardItems() else { return Vec::new() };
+    items
+        .iter()
+        .filter_map(|item| {
+            let value = item.stringForType(ns_string!("public.file-url"))?;
+            let url = url::Url::parse(&value.to_string()).ok()?;
+            let path = url.to_file_path().ok()?;
+            (path.is_absolute() && path.exists()).then_some(path)
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn clipboard_seq() -> u32 {
+    objc2_app_kit::NSPasteboard::generalPasteboard().changeCount() as u32
 }
 
 #[cfg(windows)]
@@ -1250,6 +1279,20 @@ impl Drop for SftpView {
 #[cfg(test)]
 mod view_tests {
     use super::*;
+
+    #[test]
+    fn clipboard_file_urls_keep_absolute_roots_spaces_and_unicode() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("hello world #é.txt");
+        let b = dir.path().join("second.txt");
+        std::fs::write(&a, "a").unwrap();
+        std::fs::write(&b, "b").unwrap();
+        let text = format!("{}\n{}", url::Url::from_file_path(&a).unwrap(), url::Url::from_file_path(&b).unwrap());
+        assert_eq!(parse_clipboard_paths(&text), [a.clone(), b]);
+        assert_eq!(parse_clipboard_paths(&format!("\"{}\"", a.display())), [a]);
+        assert!(parse_clipboard_paths("relative/path").is_empty());
+        assert!(parse_clipboard_paths("file://other-host/missing").is_empty());
+    }
 
     fn dummy_row(name: &str) -> Row {
         Row { name: name.into(), is_dir: false, is_link: false, size: 10, mtime: 0 }

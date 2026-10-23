@@ -28,7 +28,7 @@ pub fn next_uid() -> u64 {
 }
 
 pub enum TabBody {
-    Terminal(TerminalView),
+    Terminal(Box<TerminalView>),
     Sftp(Box<SftpView>),
     /// A remote file open in the built-in editor. Not saved in workspaces.
     Editor(Box<EditorView>),
@@ -76,7 +76,7 @@ impl Tab {
     }
 
     pub fn new_local(spec: ShellSpec, view: TerminalView) -> Self {
-        Self { local: Some(spec.clone()), ..Self::new(pty::local_profile(&spec), TabBody::Terminal(view)) }
+        Self { local: Some(spec.clone()), ..Self::new(pty::local_profile(&spec), TabBody::Terminal(Box::new(view))) }
     }
 
     pub fn is_local(&self) -> bool {

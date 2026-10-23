@@ -48,6 +48,9 @@ impl BackgroundImage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct FontChoice {
+    /// Face within a TrueType collection; older settings select face zero.
+    #[serde(default)]
+    pub index: u32,
     pub family: String,
     pub path: String,
 }
@@ -386,7 +389,7 @@ mod tests {
         let mut a = Appearance { window_opacity: 0.1, sync_with_os: true, ..Default::default() };
         assert_eq!(a.window_opacity(), Appearance::OPACITY_MIN);
         a.background_images.insert("nord".into(), BackgroundImage { path: "C:/bg.png".into(), opacity: 7.0 });
-        a.terminal_font = Some(FontChoice { family: "Cascadia Mono".into(), path: "C:/Windows/Fonts/CascadiaMono.ttf".into() });
+        a.terminal_font = Some(FontChoice { index: 0, family: "Cascadia Mono".into(), path: "C:/Windows/Fonts/CascadiaMono.ttf".into() });
         assert_eq!(a.background_image(" Nord ").map(|b| b.opacity()), Some(1.0));
         assert!(a.background_image("Dracula").is_none());
         let back: Appearance = serde_json::from_str(&serde_json::to_string(&a).unwrap()).unwrap();

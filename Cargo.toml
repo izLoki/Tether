@@ -2,7 +2,7 @@
 name = "tether"
 version = "0.2.2"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 description = "Native SSH + SFTP workspace: split terminals and a pipelined SFTP engine in one window"
 license = "MIT"
 readme = "README.md"
@@ -14,11 +14,13 @@ publish = false
 [dependencies]
 anyhow = "1.0.104"
 directories = "6.0.0"
+encoding_rs = "0.8"
 eframe = "0.36"
 egui_extras = { version = "0.36", default-features = false, features = ["syntect", "svg"] }
 egui_dock = { version = "0.21.1", features = ["serde"] }
 futures = "0.3"
-keyring = { version = "3", features = ["windows-native"] }
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
+url = "2.5"
 rfd = "0.17.2"
 russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa", "flate2"] }
 russh-sftp = "3.0.1"
@@ -64,3 +66,7 @@ libc = "0.2"
 
 [target."cfg(windows)".build-dependencies]
 embed-resource = "3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSArray"] }

@@ -283,7 +283,7 @@ impl TetherApp {
     }
 
     fn terminal_tab(&self, profile: &Profile, secret: Option<String>, ctx: &egui::Context) -> Tab {
-        Tab::new(profile.clone(), TabBody::Terminal(self.spawn_terminal(profile, secret, ctx)))
+        Tab::new(profile.clone(), TabBody::Terminal(Box::new(self.spawn_terminal(profile, secret, ctx))))
     }
 
     fn sftp_tab(&self, profile: &Profile, secret: Option<String>, ctx: &egui::Context) -> Tab {
@@ -338,7 +338,7 @@ impl TetherApp {
         tab.profile = profile;
         match (&mut tab.body, new_view) {
             (TabBody::Terminal(view), Some(v)) => {
-                *view = v;
+                **view = v;
                 if let Some(linked) = &mut tab.linked_sftp {
                     linked.view.profile = tab.profile.clone();
                     linked.view.connect(self.pool.clone(), secret, self.toasts.clone());
@@ -852,7 +852,7 @@ impl TetherApp {
             let r = ui.add(egui::TextEdit::singleline(&mut prompt.secret).password(true).desired_width(f32::INFINITY));
             r.request_focus();
             submit |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            ui.checkbox(&mut prompt.remember, "Remember in Windows Credential Manager");
+            ui.checkbox(&mut prompt.remember, format!("Remember in {}", crate::platform::credential_store()));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 submit |= ui.add(egui::Button::new("Connect").fill(theme::accent_soft())).clicked();

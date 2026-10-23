@@ -14,6 +14,7 @@ pub mod keystore;
 pub mod known_hosts;
 pub mod layout;
 pub mod local_projects;
+pub mod platform;
 pub mod procmon;
 pub mod profile;
 pub mod pty;

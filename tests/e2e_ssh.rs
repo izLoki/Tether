@@ -99,7 +99,7 @@ async fn shell_runs_commands_and_resizes() {
     term.send(b"clear; stty size\r".to_vec());
     wait_for(&term, "30 120").await;
     term.close();
-    task.await.unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), task).await.expect("shell must stop after close").unwrap().unwrap();
     assert!(matches!(term.shared.lock().unwrap().state, LinkState::Closed(_)));
 }
 
@@ -261,7 +261,7 @@ async fn finds_the_terminal_working_directory() {
     let cwd = tether::ssh::cwd::terminal_cwd(&conn, probe).await.expect("lookup");
     assert_eq!(cwd, "/etc");
     term.close();
-    task.await.unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), task).await.expect("shell must stop after close").unwrap().unwrap();
 }
 
 #[tokio::test]

@@ -103,7 +103,7 @@ impl TetherApp {
         let view = self.spawn_local(&spec, cwd, ctx);
         let tab = self.dock.iter_all_tabs_mut().map(|(_, t)| t).chain(self.detached.tabs_mut()).chain(self.mini_dock.tabs_mut()).find(|t| t.uid == uid);
         if let Some(Tab { body: TabBody::Terminal(old), .. }) = tab {
-            *old = view;
+            **old = view;
         }
     }
 }

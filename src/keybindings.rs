@@ -205,12 +205,40 @@ impl Action {
     }
 
     pub fn default_binding(self) -> Option<Binding> {
-        let cs = |k| Some(Binding::new(k, true, true, false));
-        let c = |k| Some(Binding::new(k, true, false, false));
+        let cs = |k| Some(Binding::primary(k, true, false));
+        let c = |k| Some(Binding::primary(k, false, false));
         let a = |k| Some(Binding::new(k, false, false, true));
         // Alt+Shift, not Ctrl+Alt: Windows reports AltGr as Ctrl+Alt, and Ctrl+Alt+arrows
         // rotate the screen on some Intel graphics drivers.
         let sa = |k| Some(Binding::new(k, false, true, true));
+        if cfg!(target_os = "macos") {
+            let native = match self {
+                // Finder uses Command-Shift-N for new folders in SFTP.
+                Action::NewHost => c(Key::N),
+                Action::ToggleSidebar => c(Key::B),
+                Action::ToggleSecondarySidebar => Some(Binding::primary(Key::B, false, true)),
+                Action::TogglePanel => c(Key::J),
+                Action::NewLocalTerminal => c(Key::T),
+                Action::CloseTab => c(Key::W),
+                Action::SplitRight => c(Key::D),
+                Action::SplitDown => cs(Key::D),
+                Action::FontSmaller => c(Key::Minus),
+                Action::SftpBack => c(Key::OpenBracket),
+                Action::SftpForward => c(Key::CloseBracket),
+                Action::SftpUp => c(Key::ArrowUp),
+                Action::SftpRefresh => c(Key::R),
+                Action::NextTab => Some(Binding::new(Key::Tab, true, false, false)),
+                Action::PrevTab => Some(Binding::new(Key::Tab, true, true, false)),
+                Action::FocusPaneLeft => Some(Binding::primary(Key::ArrowLeft, false, true)),
+                Action::FocusPaneRight => Some(Binding::primary(Key::ArrowRight, false, true)),
+                Action::FocusPaneUp => Some(Binding::primary(Key::ArrowUp, false, true)),
+                Action::FocusPaneDown => Some(Binding::primary(Key::ArrowDown, false, true)),
+                _ => None,
+            };
+            if native.is_some() {
+                return native;
+            }
+        }
         match self {
             Action::ToggleSidebar => cs(Key::B),
             // Not Ctrl+Alt+B (VS Code): Windows reports AltGr as Ctrl+Alt.
@@ -265,6 +293,9 @@ pub struct Binding {
     pub key: String,
     #[serde(default)]
     pub ctrl: bool,
+    /// Physical Command key; absent in settings written before macOS support.
+    #[serde(default)]
+    pub mac_cmd: bool,
     #[serde(default)]
     pub shift: bool,
     #[serde(default)]
@@ -273,7 +304,20 @@ pub struct Binding {
 
 impl Binding {
     pub fn new(key: Key, ctrl: bool, shift: bool, alt: bool) -> Self {
-        Self { key: key.name().to_string(), ctrl, shift, alt }
+        Self { key: key.name().to_string(), ctrl, mac_cmd: false, shift, alt }
+    }
+
+    /// Platform application modifier. Control stays independently bindable.
+    pub fn primary(key: Key, shift: bool, alt: bool) -> Self {
+        let mut binding = Self::new(key, !cfg!(target_os = "macos"), shift, alt);
+        binding.mac_cmd = cfg!(target_os = "macos");
+        binding
+    }
+
+    pub fn from_event(key: Key, m: Modifiers) -> Self {
+        let mut binding = Self::new(key, m.ctrl, m.shift, m.alt);
+        binding.mac_cmd = m.mac_cmd;
+        binding
     }
 
     pub fn egui_key(&self) -> Option<Key> {
@@ -281,7 +325,13 @@ impl Binding {
     }
 
     pub fn modifiers(&self) -> Modifiers {
-        Modifiers { alt: self.alt, ctrl: self.ctrl, shift: self.shift, mac_cmd: false, command: self.ctrl }
+        Modifiers {
+            alt: self.alt,
+            ctrl: self.ctrl,
+            shift: self.shift,
+            mac_cmd: self.mac_cmd,
+            command: if cfg!(target_os = "macos") { self.mac_cmd } else { self.ctrl },
+        }
     }
 
     /// Whether a key event is this binding (`=` and `+` count as the same key, so
@@ -289,7 +339,7 @@ impl Binding {
     pub fn matches(&self, key: Key, m: Modifiers) -> bool {
         let Some(own) = self.egui_key() else { return false };
         let same_key = own == key || (matches!(own, Key::Equals | Key::Plus) && matches!(key, Key::Equals | Key::Plus));
-        same_key && m.ctrl == self.ctrl && m.alt == self.alt && (m.shift == self.shift || (own == Key::Equals && key == Key::Plus))
+        same_key && m.ctrl == self.ctrl && m.mac_cmd == self.mac_cmd && m.alt == self.alt && (m.shift == self.shift || (own == Key::Equals && key == Key::Plus))
     }
 
     /// Key caps for display: `["Ctrl", "Shift", "D"]`.
@@ -298,8 +348,11 @@ impl Binding {
         if self.ctrl {
             out.push("Ctrl".to_string());
         }
+        if self.mac_cmd {
+            out.push("⌘".to_string());
+        }
         if self.alt {
-            out.push("Alt".to_string());
+            out.push(if cfg!(target_os = "macos") { "Option" } else { "Alt" }.to_string());
         }
         if self.shift {
             out.push("Shift".to_string());
@@ -420,6 +473,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn command_and_control_are_independent_and_recorded_losslessly() {
+        let control = Binding::new(Key::C, true, false, false);
+        let mut command = Binding::new(Key::C, false, false, false);
+        command.mac_cmd = true;
+        assert_ne!(control, command);
+        assert!(!control.matches(Key::C, command.modifiers()));
+        assert!(!command.matches(Key::C, control.modifiers()));
+        assert_eq!(Binding::from_event(Key::C, command.modifiers()), command);
+        assert_eq!(Binding::from_event(Key::C, control.modifiers()), control);
+        let old: Binding = serde_json::from_str(r#"{"key":"C","ctrl":true}"#).unwrap();
+        assert_eq!(old, control, "existing physical Ctrl overrides retain their meaning");
+        let back: Binding = serde_json::from_str(&serde_json::to_string(&command).unwrap()).unwrap();
+        assert_eq!(back, command);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_defaults_follow_terminal_and_finder_conventions() {
+        for (action, key, shift) in [
+            (Action::NewLocalTerminal, Key::T, false),
+            (Action::CloseTab, Key::W, false),
+            (Action::OpenSettings, Key::Comma, false),
+            (Action::SplitRight, Key::D, false),
+            (Action::SplitDown, Key::D, true),
+            (Action::SftpUp, Key::ArrowUp, false),
+            (Action::SftpRefresh, Key::R, false),
+        ] {
+            assert_eq!(action.default_binding(), Some(Binding::primary(key, shift, false)));
+        }
+        assert_eq!(Action::NextTab.default_binding(), Some(Binding::new(Key::Tab, true, false, false)));
+        for action in Action::ALL {
+            let Some(b) = action.default_binding() else { continue };
+            assert!(!(b.ctrl && matches!(b.egui_key(), Some(Key::C | Key::D | Key::L | Key::U | Key::Z))), "{action:?} steals a shell control");
+        }
+    }
+
+    #[test]
     fn unknown_actions_in_saved_overrides_are_skipped() {
         #[derive(Deserialize)]
         struct S {
@@ -437,9 +527,9 @@ mod tests {
     fn prompt_steps_and_pane_focus_do_not_collide() {
         let up = Action::PrevPrompt.default_binding().unwrap();
         let focus_up = Action::FocusPaneUp.default_binding().unwrap();
-        assert_eq!(up.label(), "Ctrl+Shift+↑");
+        assert_eq!(up, Binding::primary(Key::ArrowUp, true, false));
         assert_ne!(up, focus_up);
-        let cs = Modifiers { ctrl: true, shift: true, command: true, ..Modifiers::NONE };
+        let cs = up.modifiers();
         assert!(up.matches(Key::ArrowUp, cs) && !focus_up.matches(Key::ArrowUp, cs));
     }
 
@@ -478,7 +568,7 @@ mod tests {
         let plus = Binding::new(Key::Equals, true, false, false);
         assert!(plus.matches(Key::Plus, Modifiers { ctrl: true, shift: true, ..Modifiers::NONE }));
         assert_eq!(Binding::new(Key::Num0, true, false, false).label(), "Ctrl+0");
-        assert_eq!(Binding::new(Key::ArrowLeft, false, false, true).label(), "Alt+←");
+        assert_eq!(Binding::new(Key::ArrowLeft, false, false, true).label(), if cfg!(target_os = "macos") { "Option+←" } else { "Alt+←" });
     }
 
     #[test]

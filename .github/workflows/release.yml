@@ -62,3 +62,38 @@ jobs:
             installer/Output/Tether-Setup-${{ steps.version.outputs.version }}.exe
             installer/Output/Tether-Setup-${{ steps.version.outputs.version }}.exe.sha256
             tether-${{ steps.version.outputs.version }}-portable.exe
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches Cargo.toml
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re
+          version = re.search(r'^version = "([^"]+)"', pathlib.Path('Cargo.toml').read_text(), re.M)[1]
+          assert os.environ['RELEASE_TAG'] == f'v{version}', 'Tag does not match Cargo.toml'
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --locked --lib --test local_pty --test shell_integration -- --test-threads=1
+      - name: Package app and disk image
+        run: scripts/package-macos.sh "${{ matrix.target }}"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.dmg.sha256

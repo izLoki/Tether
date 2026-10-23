@@ -44,6 +44,10 @@ fn ctrl_byte(key: Key) -> Option<u8> {
 
 /// Bytes for a key press, or `None` when the key is handled as text / clipboard.
 pub fn encode(key: Key, m: Modifiers, app_cursor: bool) -> Option<Vec<u8>> {
+    // Command shortcuts belong to the app and must never type into a shell.
+    if m.mac_cmd {
+        return None;
+    }
     let bytes = match key {
         // Meta+Enter is understood as an inserted newline by agent TUIs. Shell
         // integration binds the same sequence to each shell's multiline editor.
@@ -77,7 +81,7 @@ pub fn encode(key: Key, m: Modifiers, app_cursor: bool) -> Option<Vec<u8>> {
         Key::F11 => tilde_key(23, m),
         Key::F12 => tilde_key(24, m),
         // Ctrl+C/V/X arrive as Copy/Paste/Cut events and are handled there.
-        Key::C | Key::V | Key::X if m.ctrl && !m.alt => return None,
+        Key::C | Key::V | Key::X if !cfg!(target_os = "macos") && m.ctrl && !m.alt => return None,
         // Ctrl+Alt is deliberately unmapped: Windows reports AltGr as Ctrl+Alt, and
         // AltGr combos (e.g. `@` on many layouts) must arrive only as Text.
         _ if m.ctrl && !m.alt => vec![ctrl_byte(key)?],
@@ -142,7 +146,14 @@ mod tests {
         assert_eq!(encode(Key::D, ctrl(), false).unwrap(), [0x04]);
         assert_eq!(encode(Key::L, ctrl(), false).unwrap(), [0x0c]);
         assert_eq!(encode(Key::OpenBracket, ctrl(), false).unwrap(), [0x1b]);
-        assert!(encode(Key::C, ctrl(), false).is_none(), "Ctrl+C goes through the Copy event");
+        if cfg!(target_os = "macos") {
+            assert_eq!(encode(Key::C, ctrl(), false).unwrap(), [0x03]);
+            assert_eq!(encode(Key::V, ctrl(), false).unwrap(), [0x16]);
+            assert_eq!(encode(Key::X, ctrl(), false).unwrap(), [0x18]);
+        } else {
+            assert!(encode(Key::C, ctrl(), false).is_none(), "Ctrl+C goes through the Copy event");
+        }
+        assert!(encode(Key::Enter, Modifiers::MAC_CMD, false).is_none());
         assert!(encode(Key::A, NONE, false).is_none(), "plain letters arrive as Text");
     }
 

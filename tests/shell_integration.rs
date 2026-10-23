@@ -88,6 +88,14 @@ fn shift_enter_inserts_a_line_and_clear_removes_old_blocks() {
     runner.join().unwrap().unwrap();
 }
 
+/// The macOS account default must report the same blocks as bash.
+#[cfg(target_os = "macos")]
+#[test]
+fn zsh_reports_blocks_with_exit_codes_and_cwd() {
+    scenario(ShellSpec { id: "zsh".into(), name: "zsh".into(), program: "/bin/zsh".into(), args: vec!["-l".into()], icon_kind: ShellIcon::Unix }, FAIL_3);
+}
+}
+
 /// Git Bash through ConPTY (skipped when Git for Windows is not installed).
 #[cfg(windows)]
 #[test]

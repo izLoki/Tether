@@ -287,39 +287,49 @@ impl SettingsView {
         p.line_segment([mark.left_top() + Vec2::new(13.0, 13.0), mark.left_top() + Vec2::new(8.0, 18.0)], ink);
         p.text(Pos2::new(mark.right() + 10.0, mark.center().y), Align2::LEFT_CENTER, "Settings", FontId::proportional(16.5), theme::text());
 
-        let top = nav.top() + 74.0;
-        let idx = Section::ALL.iter().position(|s| *s == self.section).unwrap_or(0);
-        let y = ui.ctx().animate_value_with_time(ui.id().with("nav_sel"), idx as f32 * NAV_ITEM_H, theme::anim_time(0.22));
-        let item_rect = |y: f32| Rect::from_min_size(Pos2::new(left, top + y), Vec2::new(NAV_W - 32.0, NAV_ITEM_H - 4.0));
-        let sel = item_rect(y);
-        let pill = if theme::palette().dark { theme::surface_2() } else { theme::surface() };
-        p.rect_filled(sel, CornerRadius::same(9), pill);
-        let bar = Rect::from_center_size(Pos2::new(sel.left() + 1.5, sel.center().y), Vec2::new(3.0, 16.0));
-        p.rect_filled(bar, CornerRadius::same(2), theme::accent());
+        // Reserve a fixed footer and scroll navigation on short windows / larger UI
+        // scales, so About and the version never overlap or become unreachable.
+        let body = Rect::from_min_max(Pos2::new(left, nav.top() + 74.0), Pos2::new(nav.right() - 16.0, nav.bottom() - 52.0));
+        let mut child = ui.new_child(UiBuilder::new().max_rect(body));
+        child.set_clip_rect(body);
+        egui::ScrollArea::vertical().id_salt("settings_navigation").auto_shrink([false, false]).show(&mut child, |ui| {
+            let p = ui.painter().clone();
+            let top = ui.cursor().top();
+            ui.set_min_height(Section::ALL.len() as f32 * NAV_ITEM_H);
+            let idx = Section::ALL.iter().position(|s| *s == self.section).unwrap_or(0);
+            let y = ui.ctx().animate_value_with_time(ui.id().with("nav_sel"), idx as f32 * NAV_ITEM_H, theme::anim_time(0.22));
+            let item_rect = |y: f32| Rect::from_min_size(Pos2::new(left, top + y), Vec2::new(NAV_W - 32.0, NAV_ITEM_H - 4.0));
+            let sel = item_rect(y);
+            let pill = if theme::palette().dark { theme::surface_2() } else { theme::surface() };
+            p.rect_filled(sel, CornerRadius::same(9), pill);
+            let bar = Rect::from_center_size(Pos2::new(sel.left() + 1.5, sel.center().y), Vec2::new(3.0, 16.0));
+            p.rect_filled(bar, CornerRadius::same(2), theme::accent());
 
-        for (i, section) in Section::ALL.into_iter().enumerate() {
-            let r = item_rect(i as f32 * NAV_ITEM_H);
-            let resp = ui.interact(r, ui.id().with(("nav", i)), Sense::click());
-            if resp.hovered() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            for (i, section) in Section::ALL.into_iter().enumerate() {
+                let r = item_rect(i as f32 * NAV_ITEM_H);
+                let resp = ui.interact(r, ui.id().with(("nav", i)), Sense::click());
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, section.title()));
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                let hover = ui.ctx().animate_bool_with_time(resp.id, resp.hovered() && i != idx, theme::anim_time(0.12));
+                if hover > 0.0 {
+                    p.rect_filled(r, CornerRadius::same(9), theme::surface_2().gamma_multiply(0.55 * hover));
+                }
+                let active = section == self.section;
+                let colour = if active { theme::text() } else { theme::text_dim().lerp_to_gamma(theme::text(), hover) };
+                let icon_colour = if active { theme::accent() } else { colour };
+                let icon = Rect::from_center_size(Pos2::new(r.left() + 22.0, r.center().y), Vec2::splat(15.0));
+                w::paint_icon(&p, icon, section.icon(), icon_colour);
+                p.text(Pos2::new(r.left() + 40.0, r.center().y), Align2::LEFT_CENTER, section.title(), FontId::proportional(13.5), colour);
+                if resp.clicked() && !active {
+                    self.section = section;
+                    self.section_at = now;
+                    // A shortcut being recorded must not keep every shortcut disabled.
+                    self.state.leave_section();
+                }
             }
-            let hover = ui.ctx().animate_bool_with_time(resp.id, resp.hovered() && i != idx, theme::anim_time(0.12));
-            if hover > 0.0 {
-                p.rect_filled(r, CornerRadius::same(9), theme::surface_2().gamma_multiply(0.55 * hover));
-            }
-            let active = section == self.section;
-            let colour = if active { theme::text() } else { theme::text_dim().lerp_to_gamma(theme::text(), hover) };
-            let icon_colour = if active { theme::accent() } else { colour };
-            let icon = Rect::from_center_size(Pos2::new(r.left() + 22.0, r.center().y), Vec2::splat(15.0));
-            w::paint_icon(&p, icon, section.icon(), icon_colour);
-            p.text(Pos2::new(r.left() + 40.0, r.center().y), Align2::LEFT_CENTER, section.title(), FontId::proportional(13.5), colour);
-            if resp.clicked() && !active {
-                self.section = section;
-                self.section_at = now;
-                // A shortcut being recorded must not keep every shortcut disabled.
-                self.state.leave_section();
-            }
-        }
+        });
 
         let foot = Pos2::new(left + 4.0, nav.bottom() - 22.0);
         let version = concat!("tether ", env!("CARGO_PKG_VERSION"));

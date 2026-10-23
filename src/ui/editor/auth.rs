@@ -56,7 +56,7 @@ impl ProfileEditor {
                 let help = if self.has_saved_secret {
                     "A password is saved. Leave blank to keep it."
                 } else {
-                    "Saved in Windows Credential Manager. Leave blank to be asked."
+                    "Saved in the system credential store. Leave blank to be asked."
                 };
                 self.secret_field(ui, "Password", "", help);
             }

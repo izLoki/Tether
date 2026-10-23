@@ -283,10 +283,10 @@ impl EditorView {
             child.label(RichText::new(*part).size(11.5).color(color));
         }
         child.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if self.read_only.is_none() && icon_button(ui, "💾", "Save to server (Ctrl+S)") {
+            if self.read_only.is_none() && icon_button(ui, "💾", &format!("Save to server ({})", crate::platform::shortcut("S"))) {
                 self.save();
             }
-            if icon_button(ui, "🔍", "Find (Ctrl+F)") {
+            if icon_button(ui, "🔍", &format!("Find ({})", crate::platform::shortcut("F"))) {
                 self.open_find();
             }
             let wrap_tip = if self.word_wrap { "Word wrap: on" } else { "Word wrap: off" };
@@ -486,7 +486,7 @@ impl EditorView {
             _ if self.read_only.is_some() => ("Read-only", theme::text_faint(), false, self.read_only.as_ref().map(ToString::to_string)),
             SaveStatus::Saving => ("Saving…", theme::blue(), true, None),
             SaveStatus::Failed(e) => ("Save failed", theme::danger(), false, Some(e.clone())),
-            _ if self.dirty => ("Unsaved", theme::warn(), false, Some("Ctrl+S uploads to the server".into())),
+            _ if self.dirty => ("Unsaved", theme::warn(), false, Some(format!("{} uploads to the server", crate::platform::shortcut("S")))),
             _ => ("Saved", theme::accent(), false, None),
         };
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::hover());

@@ -356,7 +356,7 @@ pub async fn run_shell(
     // Writes run on their own task so a large paste waiting on the remote window can't
     // stop us from draining output (which is what would free that window).
     let closed_by_user = Arc::new(AtomicBool::new(false));
-    let writer = {
+    let mut writer = {
         let closed_by_user = closed_by_user.clone();
         tokio::spawn(async move {
             while let Some(cmd) = rx.recv().await {
@@ -378,7 +378,14 @@ pub async fn run_shell(
 
     // Keep reading after ExitStatus/Eof: trailing output may still arrive before Close.
     let mut exit_code = None;
-    while let Some(msg) = read.wait().await {
+    loop {
+        // Some servers do not echo ChannelClose promptly. Once our writer has
+        // closed (or failed), do not leave the session task waiting on the reader.
+        let msg = tokio::select! {
+            msg = read.wait() => msg,
+            _ = &mut writer => break,
+        };
+        let Some(msg) = msg else { break };
         match msg {
             ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
                 if let Ok(mut s) = term.shared.lock() {

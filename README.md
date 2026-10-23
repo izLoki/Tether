@@ -37,17 +37,25 @@ Open **Import / export setup…** from the app or Hosts menu. **Export setup** p
 
 Download `Tether-Setup-<version>.exe` from [Releases](https://github.com/izLoki/Tether/releases) and run it. No admin rights needed. It adds Start menu and desktop shortcuts. Tether checks for new releases on startup and installs them in one click (*Settings → About → Updates*). Running a newer installer also upgrades in place.
 
-Windows is the main target. Other platforms compile, but they are untested.
+On **macOS**, download the `Tether-<version>-macos-<arch>.dmg` for Apple Silicon
+(`aarch64`) or Intel (`x86_64`), then drag Tether to Applications. macOS builds use
+Command shortcuts, Keychain, Finder file copying and native login shells. Packages
+currently use ad-hoc signing; Developer ID signing/notarization is still needed for
+Gatekeeper-trusted distribution. See [macOS support and QA](docs/macos.md).
+
+Windows and macOS have automated checks. Linux remains untested.
 
 ### Build from source
 
 ```sh
 git clone https://github.com/izLoki/Tether
 cd Tether
-cargo build --release   # → target/release/tether.exe
+cargo build --release --locked   # Windows: target/release/tether.exe; macOS: target/release/tether
+# macOS app bundle + disk image:
+scripts/package-macos.sh
 ```
 
-Requires Rust 1.85+ (edition 2024).
+Requires Rust 1.95+ (edition 2024), matching egui/eframe. macOS also needs Xcode Command Line Tools.
 
 ## Develop
 
@@ -56,9 +64,11 @@ cargo test                               # unit + headless UI tests (screenshots
 TETHER_E2E=1 cargo test -- --test-threads=1   # against a real server, see tests/e2e_ssh.rs
 ```
 
-To cut a release, bump `version` in `Cargo.toml`, commit, then run `git tag v0.1.2 && git push --tags`. GitHub Actions builds the installer (`installer/tether.iss`, Inno Setup) and publishes it with its `.sha256` and a portable exe. The icon comes from `python assets/make_icon.py`.
+To cut a release, bump `version` in `Cargo.toml`, commit, then run `git tag v0.1.2 && git push --tags`. GitHub Actions builds the installer (`installer/tether.iss`, Inno Setup) and publishes it with its `.sha256` and a portable exe. macOS jobs build Apple Silicon and Intel app bundles and publish
+DMGs with SHA-256 checksums. The icon comes from `python assets/make_icon.py`.
 
-Config lives in `%APPDATA%\tether\tether\config\`. Set `TETHER_CONFIG_DIR` to move it.
+Config lives in `%APPDATA%\tether\tether\config\` on Windows and
+`~/Library/Application Support/dev.tether.tether/` on macOS. Set `TETHER_CONFIG_DIR` to move it.
 
 ## License
 

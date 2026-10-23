@@ -380,7 +380,7 @@ pub fn font_row(ui: &mut Ui, choice: &mut Option<FontChoice>) {
                 let path = f.path.display().to_string();
                 let on = choice.as_ref().is_some_and(|c| c.path == path);
                 if ui.selectable_label(on, &f.family).clicked() && !on {
-                    *choice = Some(FontChoice { family: f.family.clone(), path });
+                    *choice = Some(FontChoice { index: f.index, family: f.family.clone(), path });
                 }
             }
         });

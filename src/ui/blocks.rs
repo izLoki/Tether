@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn step_keys() {
-        let cs = egui::Modifiers { ctrl: true, shift: true, ..Default::default() };
+        let cs = crate::keybindings::Action::PrevPrompt.default_binding().unwrap().modifiers();
         assert_eq!(step_key(egui::Key::ArrowUp, cs), Some(true));
         assert_eq!(step_key(egui::Key::ArrowDown, cs), Some(false));
         assert_eq!(step_key(egui::Key::ArrowUp, egui::Modifiers::CTRL), None);

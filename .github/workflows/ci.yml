@@ -6,7 +6,11 @@ on:
 
 jobs:
   check:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -14,6 +18,19 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --lib
-      - run: cargo test --test sftp_prompt
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --lib
+      - run: cargo test --locked --test sftp_prompt
+      - run: cargo test --locked --test local_pty --test shell_integration -- --test-threads=1
+      - name: UI and layout regression tests
+        run: cargo test --locked --test ui_flow --test ui_layout -- --test-threads=1
+      - name: macOS bundle smoke test
+        if: runner.os == 'macOS'
+        run: scripts/package-macos.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-${{ matrix.os }}
+          path: |
+            target/ui-shots/
+            dist/

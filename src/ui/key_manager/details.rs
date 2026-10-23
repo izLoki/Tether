@@ -292,7 +292,7 @@ fn passphrase_form(
         });
         super::generate::strength(ui, new);
         ui.add_space(4.0);
-        ui.checkbox(remember, "Remember in Windows Credential Manager");
+        ui.checkbox(remember, format!("Remember in {}", crate::platform::credential_store()));
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;

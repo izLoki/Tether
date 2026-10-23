@@ -96,7 +96,7 @@ impl KeyManager {
                     strength(ui, &f.pass);
                     if !f.pass.is_empty() {
                         ui.add_space(4.0);
-                        ui.checkbox(&mut f.remember, "Remember in Windows Credential Manager (no prompt when connecting)");
+                        ui.checkbox(&mut f.remember, format!("Remember in {} (no prompt when connecting)", crate::platform::credential_store()));
                     }
                 });
             });

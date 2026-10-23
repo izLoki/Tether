@@ -2,9 +2,10 @@
 //!
 //! On startup (Settings → About → "Check for updates on startup") a background thread
 //! asks the GitHub API for the latest release. When it is newer than this build, the
-//! top bar offers "Install": the `Tether-Setup-<ver>.exe` asset is downloaded to a temp
+//! top bar offers the platform installer: the `Tether-Setup-<ver>.exe` asset is downloaded to a temp
 //! folder, checked against its published `.sha256`, started with `/SILENT`, and tether
-//! quits. The installer upgrades in place (fixed AppId) and starts tether again.
+//! quits on Windows. On macOS a verified architecture-specific DMG opens in Finder;
+//! the app stays running while the user chooses when to replace it in Applications.
 //!
 //! The state is a process-wide singleton so the top bar and the About page share it.
 
@@ -25,7 +26,25 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 /// Refuse absurd assets (the installer is ~10 MB).
 const MAX_INSTALLER_BYTES: u64 = 200 * 1024 * 1024;
-const SETUP_PREFIX: &str = "Tether-Setup-";
+/// Asset names are shared with scripts/package-macos.sh and the release workflow.
+fn installer_name(version: &Version, os: &str, arch: &str) -> String {
+    match os {
+        "macos" => format!("Tether-{version}-macos-{arch}.dmg"),
+        _ => format!("Tether-Setup-{version}.exe"),
+    }
+}
+
+pub const fn install_label() -> &'static str {
+    if cfg!(target_os = "macos") { "Open installer" } else { "Install" }
+}
+
+pub const fn install_hint() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Downloads and verifies the disk image. Drag Tether to Applications, then restart Tether."
+    } else {
+        "Downloads the installer from GitHub, installs it and restarts tether"
+    }
+}
 
 /// A release newer than this build, ready to install.
 #[derive(Debug, Clone, PartialEq)]
@@ -56,6 +75,8 @@ pub enum State {
     },
     /// The installer is running; the app is closing.
     Installing,
+    /// macOS mounted the verified disk image; the user replaces the app in Finder.
+    InstallerOpened(Release),
     /// The check failed (offline, rate limited…): only shown on the About page.
     Failed(String),
     /// Downloading or starting the installer failed: shown in the top bar with a retry.
@@ -100,17 +121,21 @@ pub fn check(ctx: &egui::Context) {
         .ok();
 }
 
-/// Downloads and launches the installer of the release on offer, then closes the app.
+/// Downloads and launches the installer; Windows exits, macOS stays open for Finder.
 pub fn install(ctx: &egui::Context) {
-    let (State::Available(release) | State::InstallFailed(release, _)) = state() else { return };
+    let (State::Available(release) | State::InstallFailed(release, _) | State::InstallerOpened(release)) = state() else { return };
     set(ctx, State::Downloading { version: release.version.clone(), got: 0, total: release.installer.size });
     let ctx = ctx.clone();
     std::thread::Builder::new()
         .name("tether-update-install".into())
         .spawn(move || match download_and_launch(&ctx, &release) {
             Ok(()) => {
-                set(&ctx, State::Installing);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                if cfg!(target_os = "macos") {
+                    set(&ctx, State::InstallerOpened(release));
+                } else {
+                    set(&ctx, State::Installing);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
             }
             Err(e) => set(&ctx, State::InstallFailed(release, format!("{e:#}"))),
         })
@@ -161,6 +186,10 @@ struct ApiAsset {
 
 /// The release in `json` if it is newer than `current` and ships a valid installer.
 fn newer_release(json: &str, current: &Version) -> Result<Option<Release>> {
+    newer_release_for(json, current, std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn newer_release_for(json: &str, current: &Version, os: &str, arch: &str) -> Result<Option<Release>> {
     let api: ApiRelease = serde_json::from_str(json).context("unexpected answer from GitHub")?;
     if api.draft || api.prerelease {
         return Ok(None);
@@ -169,7 +198,7 @@ fn newer_release(json: &str, current: &Version) -> Result<Option<Release>> {
     if version <= *current {
         return Ok(None);
     }
-    let installer_name = format!("{SETUP_PREFIX}{version}.exe");
+    let installer_name = installer_name(&version, os, arch);
     let installer = pick_asset(&api.assets, &installer_name).ok_or_else(|| anyhow!("release v{version} has no {installer_name}"))?;
     ensure!(installer.size > 0 && installer.size <= MAX_INSTALLER_BYTES, "the installer of v{version} has an unexpected size");
     let checksum = pick_asset(&api.assets, &format!("{installer_name}.sha256")).ok_or_else(|| anyhow!("release v{version} has no checksum"))?;
@@ -249,8 +278,13 @@ fn download(ctx: &egui::Context, release: &Release, path: &Path, expected: &[u8;
 }
 
 fn launch(installer: &Path) -> Result<()> {
+    if cfg!(target_os = "macos") {
+        let status = std::process::Command::new("/usr/bin/open").arg(installer).status().context("opening the macOS disk image")?;
+        ensure!(status.success(), "macOS could not open the disk image ({status})");
+        return Ok(());
+    }
     if !cfg!(windows) {
-        bail!("automatic install is only available on Windows; download it from the release page");
+        bail!("automatic install is unavailable on this platform; download it from the release page");
     }
     std::process::Command::new(installer)
         .args(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/RELAUNCH=1"])
@@ -262,6 +296,28 @@ fn launch(installer: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Windows fixtures still verify the original installer on every test host.
+    fn newer_release(json: &str, current: &Version) -> Result<Option<Release>> {
+        super::newer_release_for(json, current, "windows", "x86_64")
+    }
+
+    #[test]
+    fn macos_updates_select_matching_architecture_and_require_checksums() {
+        for arch in ["aarch64", "x86_64"] {
+            let name = installer_name(&Version::new(0, 2, 0), "macos", arch);
+            let base = "https://github.com/izLoki/Tether/releases/download/v0.2.0";
+            let assets =
+                [good_assets("0.2.0"), asset(&name, &format!("{base}/{name}")), asset(&format!("{name}.sha256"), &format!("{base}/{name}.sha256"))].join(",");
+            let release = super::newer_release_for(&release_json("v0.2.0", &assets), &current(), "macos", arch).unwrap().unwrap();
+            assert_eq!(release.installer.name, name);
+            assert!(super::newer_release_for(&release_json("v0.2.0", &good_assets("0.2.0")), &current(), "macos", arch).is_err());
+            let missing_sum = asset(&name, &format!("{base}/{name}"));
+            assert!(super::newer_release_for(&release_json("v0.2.0", &missing_sum), &current(), "macos", arch).is_err());
+            let foreign = assets.replace("https://github.com/", "https://evil.example/");
+            assert!(super::newer_release_for(&release_json("v0.2.0", &foreign), &current(), "macos", arch).is_err());
+        }
+    }
 
     fn release_json(tag: &str, assets: &str) -> String {
         format!(

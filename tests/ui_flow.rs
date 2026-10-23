@@ -9,6 +9,7 @@ use eframe::egui::{self, Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use tether::app::TetherApp;
+use tether::keybindings::Action;
 
 const PROFILES: &str = r#"[
  {"id":"11111111-1111-4111-8111-111111111111","name":"Docker sshd","group":"Lab","host":"127.0.0.1","port":2222,"user":"tester","auth":"Password","hue":150,"pipeline_kb":4096,"remote_start_dir":"","last_used":1760000000},
@@ -115,16 +116,19 @@ fn ui_flows() {
 /// Two local shells in the Sessions view, then the command palette over them.
 fn local_tabs_and_palette(h: &mut Harness<'_, TetherApp>) {
     let palette = |h: &mut Harness<'_, TetherApp>| {
-        h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::P);
+        let b = Action::CommandPalette.default_binding().unwrap();
+        h.key_press_modifiers(b.modifiers(), b.egui_key().unwrap());
         h.run_steps(10);
     };
     palette(h);
-    h.event(egui::Event::Text("vertical tabs left".into()));
+    h.event(egui::Event::Text("Focus Sessions view".into()));
     h.run_steps(5);
     h.key_press(Key::Enter);
     h.run_steps(10);
+    assert!(tether::settings::snapshot().layout.views.is_shown(tether::layout::View::Sessions));
     for _ in 0..2 {
-        h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::T);
+        let b = Action::NewLocalTerminal.default_binding().unwrap();
+        h.key_press_modifiers(b.modifiers(), b.egui_key().unwrap());
         h.run_steps(5);
     }
     settle(h, 4, |_| false);
@@ -212,7 +216,13 @@ impl Drop for ForgetSecret {
 fn connected_flow(h: &mut Harness<'_, TetherApp>) {
     let _ = tether::profile::secret::delete(TEST_PROFILE.parse().unwrap());
     let _cleanup = ForgetSecret;
-    h.get_by_label_contains("tester@127.0.0.1:2222").click();
+    if h.query_by_label("Docker sshd").is_none() {
+        h.get_by_label("Hosts view").click();
+        h.run_steps(10);
+    }
+    h.get_by_label("Docker sshd").click_secondary();
+    h.run_steps(10);
+    h.get_by_label_contains("Connect terminal").click();
     h.run_steps(10);
     let pw = h.get_by_role(egui::accesskit::Role::PasswordInput);
     pw.focus();
@@ -230,13 +240,15 @@ fn connected_flow(h: &mut Harness<'_, TetherApp>) {
     shot(h, "03-terminal");
 
     // Ctrl+Shift+F opens SFTP next to the focused terminal.
-    h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::F);
+    let b = Action::OpenSftp.default_binding().unwrap();
+    h.key_press_modifiers(b.modifiers(), b.egui_key().unwrap());
     settle(h, 8, |h| h.query_by_label_contains("REMOTE").is_some() && h.query_by_label("Connecting…").is_none());
     shot(h, "04-split-sftp");
 
     // Ctrl+Shift+E splits another terminal below.
     h.get_by_label("Terminal").click();
-    h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::E);
+    let b = Action::SplitDown.default_binding().unwrap();
+    h.key_press_modifiers(b.modifiers(), b.egui_key().unwrap());
     settle(h, 5, |_| false);
     shot(h, "05-three-panes");
 }

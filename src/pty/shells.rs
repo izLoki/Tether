@@ -64,12 +64,18 @@ impl ShellSpec {
             "cmd" => "cmd".into(),
             "pwsh" => {
                 // `…\PowerShell\7\pwsh.exe` -> "pwsh 7".
-                let version =
-                    self.program.parent().and_then(|d| d.file_name()).and_then(|v| v.to_str()).filter(|v| v.starts_with(|c: char| c.is_ascii_digit()));
-                version.map_or_else(|| "pwsh".into(), |v| format!("pwsh {v}"))
+                let program = self.program.to_string_lossy();
+                let version = program.rsplit(['/', '\\']).nth(1).filter(|v| v.starts_with(|c: char| c.is_ascii_digit()));                version.map_or_else(|| "pwsh".into(), |v| format!("pwsh {v}"))
             }
             id => id.strip_prefix("wsl:").map_or_else(|| self.name.clone(), str::to_string),
         }
+    }
+
+    /// Workspaces imported from another OS can contain either path separator.
+    pub fn program_stem(&self) -> String {
+        let path = self.program.to_string_lossy();
+        let name = path.rsplit(['/', '\\']).next().unwrap_or(&path).to_lowercase();
+        name.strip_suffix(".exe").unwrap_or(&name).to_string()
     }
 
     fn new(id: impl Into<String>, name: impl Into<String>, program: impl Into<PathBuf>, args: &[&str], icon_kind: ShellIcon) -> Self {
@@ -128,7 +134,7 @@ pub fn pick_default<'a>(shells: &'a [ShellSpec], wanted: &str) -> Option<&'a She
 pub fn parse_wsl_list(bytes: &[u8]) -> Vec<String> {
     let looks_utf16 = bytes.len() >= 2 && (bytes.starts_with(&[0xFF, 0xFE]) || bytes.iter().skip(1).step_by(2).take(8).all(|b| *b == 0));
     let text = if looks_utf16 {
-        let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().copied().map(u16::from_le_bytes).collect();
         String::from_utf16_lossy(&units)
     } else {
         String::from_utf8_lossy(bytes).into_owned()
@@ -161,10 +167,10 @@ pub fn newest_pwsh(dirs: &[PathBuf]) -> Option<PathBuf> {
 }
 
 fn on_path(exe: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|d| d.join(exe)).find(|p| p.is_file())
+    crate::platform::executable_dirs().iter().map(|d| d.join(exe)).find(|p| p.is_file())
 }
 
+#[cfg(not(target_os = "macos"))]
 fn env_dir(var: &str) -> Option<PathBuf> {
     std::env::var_os(var).map(PathBuf::from).filter(|p| !p.as_os_str().is_empty())
 }
@@ -263,6 +269,9 @@ pub fn stdout_within(mut cmd: std::process::Command, timeout: Duration) -> Optio
 
 #[cfg(not(windows))]
 fn detect() -> Vec<ShellSpec> {
+    #[cfg(target_os = "macos")]
+    let mut paths = vec![crate::platform::login_shell()];
+    #[cfg(not(target_os = "macos"))]
     let mut paths: Vec<PathBuf> = env_dir("SHELL").into_iter().collect();
     let listed = std::fs::read_to_string("/etc/shells").map(|t| parse_etc_shells(&t)).unwrap_or_default();
     for name in ["bash", "zsh", "fish"] {

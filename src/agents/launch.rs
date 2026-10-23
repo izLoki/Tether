@@ -22,10 +22,9 @@ static FOUND: OnceLock<Vec<Launcher>> = OnceLock::new();
 /// Agents installed on this machine (searched once).
 pub fn available() -> &'static [Launcher] {
     FOUND.get_or_init(|| {
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+        let dirs = crate::platform::executable_dirs();
         let exts = executable_extensions();
-        CANDIDATES.iter().filter_map(|(kind, cmd)| find(&dirs, cmd, &exts).map(|path| Launcher { kind: *kind, command: cmd, path })).collect()
+        CANDIDATES.iter().filter_map(|(kind, cmd)| find(dirs, cmd, &exts).map(|path| Launcher { kind: *kind, command: cmd, path })).collect()
     })
 }
 

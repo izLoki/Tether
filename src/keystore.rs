@@ -371,6 +371,12 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
         opts.mode(0o600);
     }
     let mut file = opts.open(path).with_context(|| format!("writing {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // mode() only applies when creating; exports may overwrite an existing file.
+        file.set_permissions(std::fs::Permissions::from_mode(0o600)).context("protecting private key file")?;
+    }
     file.write_all(bytes).context("writing key file")?;
     file.sync_all().context("flushing key file")
 }
@@ -430,6 +436,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = KeyStore::load(dir.path().join("keys")).unwrap();
         (dir, store)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_key_exports_restrict_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("key");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&path, b"private").unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read(&path).unwrap(), b"private");
     }
 
     #[test]

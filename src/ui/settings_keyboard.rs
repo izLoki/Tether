@@ -124,9 +124,9 @@ fn record(ui: &mut Ui, s: &mut Settings, st: &mut KeyboardState) {
         }
         _ if !(m.ctrl || m.command || m.alt || is_function_key(key)) => {
             // A bare key would be stolen from the terminal and every text field.
-            st.note = Some((action, "Use Ctrl or Alt with the key (function keys work alone)".into()));
+            st.note = Some((action, "Use Command, Control or Alt/Option with the key (function keys work alone)".into()));
         }
-        _ => st.note = assign(s, action, Binding::new(key, m.ctrl || m.command, m.shift, m.alt)),
+        _ => st.note = assign(s, action, Binding::from_event(key, m)),
     }
     stop(st);
 }

@@ -87,7 +87,7 @@ pub enum ShellKind {
 }
 
 pub fn kind(spec: &ShellSpec) -> ShellKind {
-    let stem = spec.program.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let stem = spec.program_stem();
     match (spec.icon_kind, stem.as_str()) {
         (ShellIcon::Cmd, _) => ShellKind::Unsupported,
         (ShellIcon::Wsl, _) | (_, "wsl") => ShellKind::Wsl,

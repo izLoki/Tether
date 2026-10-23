@@ -32,7 +32,7 @@ pub fn tab_title(spec: &ShellSpec, title: Option<&str>, cwd: Option<&str>) -> St
         return format!("{} · {folder}", spec.short_name());
     }
     let program = spec.program.to_string_lossy().to_lowercase();
-    let stem = spec.program.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let stem = spec.program_stem();
     match title.map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) if t.to_lowercase() == program || t.to_lowercase().trim_end_matches(".exe").ends_with(&stem) => spec.short_name(),
         Some(t) => t.to_string(),

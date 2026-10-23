@@ -14,8 +14,8 @@ const PILL_H: f32 = 24.0;
 pub fn top_bar(ui: &mut Ui) {
     match updater::state() {
         State::Available(r) => {
-            let resp = pill(ui, &format!("↑  Update v{} available  ·  Install", r.version), theme::accent(), None)
-                .on_hover_text("Downloads the installer from GitHub, installs it and restarts tether");
+            let resp = pill(ui, &format!("↑  Update v{} available  ·  {}", r.version, updater::install_label()), theme::accent(), None)
+                .on_hover_text(updater::install_hint());
             if resp.clicked() {
                 updater::install(ui.ctx());
             }
@@ -32,6 +32,9 @@ pub fn top_bar(ui: &mut Ui) {
             if resp.clicked() {
                 updater::install(ui.ctx());
             }
+        }
+        State::InstallerOpened(_) => {
+            pill(ui, "Update opened · Drag Tether to Applications, then restart", theme::accent(), None);
         }
         State::Idle | State::Checking | State::UpToDate | State::Failed(_) => {}
     }
@@ -85,6 +88,7 @@ fn status_text(state: &State) -> (String, egui::Color32) {
         State::UpToDate => (format!("v{current} is the latest version"), theme::accent()),
         State::Available(r) => (format!("v{} is available (you have v{current})", r.version), theme::accent()),
         State::Downloading { version, got, total } => (format!("Downloading v{version}: {} of {}", mb(*got), mb(*total)), theme::blue()),
+        State::InstallerOpened(_) => ("Drag Tether to Applications, then restart Tether".into(), theme::accent()),
         State::Installing => ("Starting the installer…".into(), theme::blue()),
         State::Failed(e) => (format!("Couldn't check: {e}"), theme::warn()),
         State::InstallFailed(_, e) => (format!("Update failed: {e}"), theme::danger()),
@@ -93,8 +97,8 @@ fn status_text(state: &State) -> (String, egui::Color32) {
 
 fn action_button(ui: &mut Ui, state: &State) {
     match state {
-        State::Available(r) | State::InstallFailed(r, _) => {
-            if w::primary_button(ui, &format!("Install v{}", r.version)).clicked() {
+        State::Available(r) | State::InstallFailed(r, _) | State::InstallerOpened(r) => {
+            if w::primary_button(ui, &format!("{} v{}", updater::install_label(), r.version)).clicked() {
                 updater::install(ui.ctx());
             }
             if w::ghost_button(ui, "Release notes", theme::text_dim()).clicked() {

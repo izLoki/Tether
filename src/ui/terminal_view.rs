@@ -582,8 +582,8 @@ impl TerminalView {
         if !response.hovered() {
             return;
         }
-        let (wheel, zoom, ctrl, now) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta(), i.modifiers.ctrl, i.time));
-        if ctrl && zoom != 1.0 {
+        let (wheel, zoom, ctrl, now) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta(), i.modifiers.command, i.time));
+        if zoom != 1.0 {
             let current = settings::snapshot().terminal.font_size();
             self.set_font_size(current * zoom, false);
             self.font_dirty_at = Some(now);
@@ -619,11 +619,14 @@ impl TerminalView {
         for event in events {
             match event {
                 Event::Text(t) => {
-                    if !mods.ctrl && !mods.alt {
+                    if !mods.ctrl && !mods.mac_cmd && (!mods.alt || cfg!(target_os = "macos")) {
                         self.mark_prompt_start();
                         self.cache.typed_line.push_str(&t);
                     }
-                    out.input.extend(keys::encode_text(&t, mods.alt && !mods.ctrl));
+                    if mods.mac_cmd {
+                        continue;
+                    }
+                    out.input.extend(keys::encode_text(&t, mods.alt && !mods.ctrl && !cfg!(target_os = "macos")));
                 }
                 Event::Paste(t) => {
                     if !self.cache.paste_guard.explicit(ui.ctx().cumulative_frame_nr()) {
@@ -655,13 +658,14 @@ impl TerminalView {
                         ui.ctx().copy_text(text);
                         self.selection = None;
                     }
-                    _ => {
+                    _ if !cfg!(target_os = "macos") => {
                         self.prompt_col = None;
                         self.cache.typed_line.clear();
                         out.input.push(0x03);
                     }
+                    _ => {}
                 },
-                Event::Cut => out.input.push(0x18),
+                Event::Cut if !cfg!(target_os = "macos") => out.input.push(0x18),
                 Event::Key { key, pressed: true, modifiers, .. } => {
                     if self.images_enabled && key == egui::Key::Enter && !modifiers.shift && self.cache.attachments.is_pending() {
                         self.cache.attachments.notice = Some("Preparing images… Press Enter once the attachment is ready.".into());
@@ -682,7 +686,7 @@ impl TerminalView {
                         self.cache.typed_line.push('\n');
                     } else if key == egui::Key::Backspace && !modifiers.ctrl && !modifiers.alt {
                         self.cache.typed_line.pop();
-                    } else if (modifiers.ctrl || modifiers.command) && matches!(key, egui::Key::C | egui::Key::U) {
+                    } else if modifiers.ctrl && matches!(key, egui::Key::C | egui::Key::U) {
                         self.prompt_col = None;
                         self.cache.typed_line.clear();
                     } else if key == egui::Key::Enter && !modifiers.shift && !modifiers.ctrl && !modifiers.alt && !modifiers.command {
@@ -1132,6 +1136,46 @@ mod bench;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_copy_never_interrupts_and_option_text_is_utf8() {
+        let (handle, _) = TerminalHandle::new(24, 80);
+        let mut view = TerminalView::new(handle);
+        view.typed_line = "keep this command".into();
+        let ctx = egui::Context::default();
+        let mut output = ViewOutput::default();
+        let mut frame = ctx.run_ui(egui::RawInput { events: vec![Event::Copy, Event::Cut], ..Default::default() }, |ui| {
+            view.handle_keys(ui, false, false, &mut output);
+        });
+        frame.textures_delta.clear();
+        assert!(output.input.is_empty(), "clipboard gestures must not send SIGINT or Ctrl+X");
+        assert_eq!(view.typed_line, "keep this command");
+        let mut frame =
+            ctx.run_ui(egui::RawInput { events: vec![Event::ModifiersChanged(egui::Modifiers::ALT), Event::Text("é@".into())], ..Default::default() }, |ui| {
+                view.handle_keys(ui, false, false, &mut output);
+            });
+        frame.textures_delta.clear();
+        assert_eq!(output.input, "é@".as_bytes(), "Option produces text without a Meta ESC prefix");
+        assert!(view.typed_line.ends_with("é@"));
+        output.input.clear();
+        let ctrl = egui::Modifiers::CTRL;
+        let mut frame = ctx.run_ui(
+            egui::RawInput {
+                events: vec![
+                    Event::ModifiersChanged(ctrl),
+                    Event::Key { key: egui::Key::C, physical_key: None, pressed: true, repeat: false, modifiers: ctrl },
+                ],
+                ..Default::default()
+            },
+            |ui| {
+                view.handle_keys(ui, false, false, &mut output);
+            },
+        );
+        frame.textures_delta.clear();
+        assert_eq!(output.input, [3]);
+        assert!(view.typed_line.is_empty());
+    }
 
     #[test]
     fn image_button_follows_foreground_agent_and_releases_its_space() {
